@@ -839,17 +839,18 @@
       const shear = context.createGain();
       const shearFilter = context.createBiquadFilter();
       const compressor = context.createDynamicsCompressor();
+      const octaveDown = 0.5;
 
       master.gain.value = 0;
       drone.gain.value = 0.7;
       droneFilter.type = "lowpass";
-      droneFilter.frequency.value = 150;
+      droneFilter.frequency.value = 150 * octaveDown;
       droneFilter.Q.value = 1.2;
       turbulenceFilter.type = "lowpass";
-      turbulenceFilter.frequency.value = 180;
+      turbulenceFilter.frequency.value = 180 * octaveDown;
       turbulenceFilter.Q.value = 0.65;
       shearFilter.type = "bandpass";
-      shearFilter.frequency.value = 420;
+      shearFilter.frequency.value = 420 * octaveDown;
       shearFilter.Q.value = 0.8;
       compressor.threshold.value = -20;
       compressor.knee.value = 16;
@@ -873,7 +874,7 @@
         const oscillator = context.createOscillator();
         const gain = context.createGain();
         oscillator.type = type;
-        oscillator.frequency.value = frequency;
+        oscillator.frequency.value = frequency * octaveDown;
         oscillator.detune.value = (Math.random() - 0.5) * 7;
         gain.gain.value = level;
         oscillator.connect(gain).connect(drone);
@@ -918,6 +919,7 @@
         turbulenceFilter,
         shear,
         shearFilter,
+        octaveDown,
       };
     };
     const updateAudio = (immediate = false) => {
@@ -958,11 +960,20 @@
         audio.master.gain,
         soundEnabled ? (ambientFloor + intensity * 0.54) * interiorSilence : 0,
       );
-      target(audio.droneFilter.frequency, 145 + intensity * 1050);
+      target(
+        audio.droneFilter.frequency,
+        (145 + intensity * 1050) * audio.octaveDown,
+      );
       target(audio.turbulence.gain, 0.13 + intensity * 0.62);
-      target(audio.turbulenceFilter.frequency, 170 + intensity * 1350);
+      target(
+        audio.turbulenceFilter.frequency,
+        (170 + intensity * 1350) * audio.octaveDown,
+      );
       target(audio.shear.gain, 0.015 + intensity * 0.7);
-      target(audio.shearFilter.frequency, 380 + intensity * 1750);
+      target(
+        audio.shearFilter.frequency,
+        (380 + intensity * 1750) * audio.octaveDown,
+      );
     };
     const awakenAudio = () => {
       if (!soundEnabled) return;
