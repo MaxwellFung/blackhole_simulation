@@ -89,11 +89,11 @@
     flat in vec3 radial;
     flat in float observerU,lapse;
     in vec3 ray;
-    uniform sampler2D deflectionTable,radiusTable;
+    uniform sampler2D deflectionTable,radiusTable,noiseTexture;
     uniform vec2 resolution,pan;
     uniform float time,falling,interior;
     out vec4 color;
-    const float PI=3.141592653589793,MU=4./27.,EH=.5,RI=1.5,RO=2.8;
+    const float PI=3.141592653589793,MU=4./27.,EH=.5,RI=1.5,RO=7.4;
     const float UO=EH/RO,CULL=.8*UO*UO*(1.-UO),GUARD=.85*UO*UO*(1.-UO);
     const ivec2 DS=ivec2(512),RS=ivec2(256,128);
     ${sampling}
@@ -127,18 +127,6 @@
       p+=dot(p,p+45.32);
       return fract(p.x*p.y);
     }
-    float noise(vec2 p){
-      vec2 i=floor(p),f=fract(p);
-      f=f*f*(3.-2.*f);
-      return mix(mix(hash21(i),hash21(i+vec2(1,0)),f.x),
-                 mix(hash21(i+vec2(0,1)),hash21(i+1.),f.x),f.y);
-    }
-    float fbm(vec2 p){
-      float n=0.,a=.55;
-      mat2 m=mat2(1.62,1.18,-1.18,1.62);
-      for(int i=0;i<4;i++){n+=a*noise(p);p=m*p+7.13;a*=.48;}
-      return n;
-    }
     float hash31(vec3 p){
       p=fract(p*vec3(443.897,441.423,437.195));
       p+=dot(p,p.yzx+19.19);
@@ -155,33 +143,87 @@
     vec3 plasma(float u,float opacity,float height,float orbitalPhase){
       float r=EH/max(u,1e-5);
       float q=clamp((r-RI)/(RO-RI),0.,1.);
-      // Keplerian shear: the inner gas completes an orbit much faster.
-      float spin=time*(2.3/pow(r,1.5));
-      // Screen-space phase avoids the parity reversal of secondary lens images.
-      // Subtracting spin makes every visible feature advance counterclockwise.
-      float angle=orbitalPhase-spin;
-      vec2 orbit=vec2(cos(angle),sin(angle));
-      vec2 flow=orbit*5.2+
-                vec2(r*7.5+height*9.,r*20.-time*.17);
-      float coarse=fbm(flow);
-      float fine=fbm(orbit*18.+
-                     vec2(-r*9.+height*21.,
-                          r*72.+coarse*4.-time*.65));
-      float filaments=smoothstep(.28,.92,.52*coarse+.72*fine);
-      float knots=fbm(orbit*2.1+vec2(-time*.08,r*5.7));
-      float rings=.68+.32*sin(r*82.+coarse*8.-time*.8);
-      float density=mix(.34,1.08,filaments)*mix(.86,1.15,rings);
-      density*=mix(.72,1.32,smoothstep(.22,.86,knots));
-      density*=exp(-height*height*2.2);
-      float heat=pow(1.-q,.42);
-      float hot=pow(heat,2.2)*mix(.52,1.48,fine)*mix(.8,1.25,knots);
-      vec3 copper=vec3(1.0,.19,.025);
-      vec3 amber=vec3(1.0,.54,.16);
-      vec3 white=vec3(1.0,.93,.72);
-      vec3 tint=mix(copper,amber,smoothstep(0.,.78,heat));
-      tint=mix(tint,white,smoothstep(.48,1.08,hot));
-      float beaming=.78+.32*sin(orbitalPhase+1.1);
-      return tint*opacity*density*(1.15+5.8*hot)*beaming;
+      // Keplerian advection shears one persistent material field: inner gas
+      // laps the outer gas, producing fluid motion without a fluid simulation.
+      float spin=time*(1.72/pow(r,1.5));
+      vec2 flow=vec2(
+        orbitalPhase/(2.*PI)-spin/(2.*PI),
+        q
+      );
+
+      // Two mipmapped RGBA texture reads replace the old multi-fBm material.
+      // The second field stays broad and softly warped: no ridged transform,
+      // so the result resembles tumbling molten rock rather than polished
+      // liquid-metal ribbons.
+      vec4 broadField=textureLod(
+        noiseTexture,
+        flow+vec2(height*.009,-height*.018),
+        0.
+      );
+      vec2 warp=broadField.rg-.5;
+      vec4 detailField=textureLod(
+        noiseTexture,
+        flow*vec2(3.,2.35)+warp*vec2(.19,.15)+
+          vec2(time*.003+height*.010,height*.021),
+        0.
+      );
+      float broad=broadField.b;
+      float rockField=broad*.55+detailField.g*.28+detailField.a*.17;
+      float molten=smoothstep(.32,.76,rockField);
+      float crust=smoothstep(.55,.84,
+        broadField.r*.58+detailField.r*.42);
+      float sand=detailField.a*.55+detailField.b*.45;
+      float outerMix=smoothstep(.46,.88,q);
+      float whiteCore=1.-smoothstep(.08,.25,q);
+
+      // Multiplicative log-normal density creates rock-like knots and broad
+      // voids; coherent height coordinates keep the volume from becoming
+      // another visible stack of independent sheets.
+      float clumps=exp2(clamp(2.65*(rockField-.5),-1.7,1.45));
+      float density=clumps*mix(.42,1.34,molten);
+      density*=mix(1.,.46,crust*(1.-molten*.58));
+      float midplane=exp(-pow(abs(height),3.2));
+      float atmosphere=exp(-abs(height)*.66);
+      float vertical=.60*midplane+.40*atmosphere;
+      float sandyDensity=mix(.30,1.12,sand)*
+                         exp2(1.15*(broad-.5));
+      density=mix(density,sandyDensity,outerMix);
+      density*=vertical;
+      // The inner photosphere is optically thick enough that individual
+      // turbulent cells disappear into a nearly uniform white-hot surface.
+      density=mix(density,1.42*vertical,whiteCore*.92);
+      density*=2.;
+
+      // A long radial shoulder followed by a steep power falloff produces the
+      // dim, smoky outer edge in the reference instead of a luminous cutout.
+      float innerEdge=smoothstep(RI,RI+.10,r);
+      float outerEdge=pow(
+        max(1.-smoothstep(RO-2.10,RO,r),0.),
+        1.85
+      );
+      float edge=innerEdge*outerEdge;
+      float heat=pow(max(1.-q,0.),1.8);
+      float hot=heat*heat*mix(.24,1.26,molten)*
+                mix(.72,1.12,broad);
+
+      vec3 ember=vec3(.48,.045,.006);
+      vec3 copper=vec3(1.0,.24,.035);
+      vec3 cream=vec3(1.0,.82,.54);
+      vec3 white=vec3(1.0,.985,.91);
+      vec3 tint=mix(ember,copper,smoothstep(.02,.46,heat));
+      tint=mix(tint,cream,smoothstep(.38,.96,hot));
+      tint=mix(tint,white,smoothstep(1.02,1.38,hot));
+      vec3 sandDark=vec3(.20,.045,.012);
+      vec3 sandLight=vec3(.68,.24,.055);
+      vec3 sandTint=mix(sandDark,sandLight,sand);
+      tint=mix(tint,sandTint,outerMix);
+      tint=mix(tint,vec3(1.,.975,.86),whiteCore*.96);
+
+      float beaming=.83+.23*sin(orbitalPhase+1.1);
+      float emission=density*edge*(.045+3.45*hot)*
+                     mix(1.,.28,outerMix);
+      emission=mix(emission,6.2*edge*vertical,whiteCore*.94);
+      return tint*opacity*emission*beaming;
     }
     vec3 fallRay(vec3 local,out float frequencyShift){
       // Exact local aberration for a radial geodesic dropped from rest at
@@ -246,12 +288,19 @@
       float side=ud>=0.?1.:-1.,pa=aa+PI*.5;
       float p=a+(side>0.?PI-delta:delta)+side*alpha;
       float p0=mod(p,PI),c0=radius(e,p0);
+      float flip0=mod(floor(p/PI),2.);
+      vec3 hitAxis0=flip0<1.?axis:-axis;
+      float hitPhi0=atan(hitAxis0.z,hitAxis0.x);
       bool v0=p0<pa;
       float rs=side*(c0-observerU);
       v0=v0&&(rs>1e-3||(rs>-1e-3&&alpha<delta));
       float u0=v0?c0:-1.;
 
-      float p1=mod(2.*pa-p,PI),c1=radius(e,p1);
+      float reflected=2.*pa-p;
+      float p1=mod(reflected,PI),c1=radius(e,p1);
+      float flip1=mod(floor(reflected/PI),2.);
+      vec3 hitAxis1=flip1<1.?axis:-axis;
+      float hitPhi1=atan(hitAxis1.z,hitAxis1.x);
       bool v1=e<MU&&side>0.&&p1<pa;
       float u1=v1?c1:-1.;
       float w0=min(fwidth(c0),fwidth(u0<0.?u1:u0));
@@ -261,8 +310,8 @@
       if(observerU<UO&&e<GUARD)return vec3(0);
 
       vec3 light=vec3(0);
-      if(o0>0.)light+=plasma(u0,o0,height,orbitalPhase);
-      if(o1>0.)light+=plasma(u1,o1,height,orbitalPhase);
+      if(o0>0.)light+=plasma(u0,o0,height,hitPhi0);
+      if(o1>0.)light+=plasma(u1,o1,height,hitPhi1);
 
       // A low-energy sheath gives the optically thick surface a soft edge
       // without changing the solved geodesic silhouette.
@@ -287,21 +336,24 @@
       sky+=vec3(.018,.022,.032)*milky*dust;
       return sky;
     }
-    vec3 raytracedSpace(vec3 local){
+    vec3 raytracedSpace(vec3 local,out vec3 diskLight){
       // This is the numerical light-path integration from the reference
       // renderer, expressed in the same Schwarzschild units as the lookup
       // geometry. There is no screen-space lens mask or circular blend.
       const float HORIZON=EH;
+      diskLight=vec3(0);
+      float transmission=1.;
       vec3 pos=radial*(EH/max(observerU,1e-6));
       float frequencyShift=1.;
       vec3 dir;
       if(falling>.5)dir=fallRay(local,frequencyShift);
       else dir=normalize(local);
+      float marchSeed=hash21(gl_FragCoord.xy*.75487766);
       for(int i=0;i<176;i++){
         float r=length(pos);
         if(r<HORIZON*1.001)return vec3(0);
         if(r>46.&&dot(pos,dir)>0.){
-          vec3 sky=spaceColor(dir);
+          vec3 sky=spaceColor(dir)*transmission;
           return falling>.5?shiftedSpectrum(sky,frequencyShift):sky;
         }
 
@@ -309,6 +361,52 @@
         float h2=max(dot(pos,pos)-radialSpeed*radialSpeed,0.);
         float ds=clamp((r-HORIZON)*.1,.035,.68);
         if(r>15.)ds=min(ds,1.);
+        // A stable low-discrepancy offset turns coherent ray-march contours
+        // into sub-pixel grain that the existing optical filter removes.
+        float sampleOffset=fract(
+          marchSeed+float(i)*.61803398875
+        )-.5;
+        vec3 materialPos=pos+dir*ds*sampleOffset;
+        float cylindricalR=length(materialPos.xz);
+
+        // Integrate emission and extinction through a continuous, flared
+        // cylindrical volume. This remains well-defined when the camera lies
+        // exactly in the disk plane, unlike equatorial sheet intersections.
+        if(cylindricalR>=RI&&cylindricalR<=RO){
+          float diskQ=clamp((cylindricalR-RI)/(RO-RI),0.,1.);
+          float scaleHeight=mix(.100,.380,pow(diskQ,.78));
+          float normalizedHeight=materialPos.y/scaleHeight;
+          if(abs(normalizedHeight)<3.40&&transmission>.008){
+            if(abs(normalizedHeight)<.90)ds=min(ds,.050);
+            vec3 sampleColor=plasma(
+              EH/cylindricalR,
+              1.,
+              normalizedHeight,
+              atan(materialPos.z,materialPos.x)
+            );
+            if(falling>.5)
+              sampleColor=shiftedSpectrum(
+                sampleColor,
+                clamp(frequencyShift,.35,1.8)
+              );
+            float verticalDensity=exp(
+              -normalizedHeight*normalizedHeight*.82
+            );
+            float stepDepth=ds/max(scaleHeight,.025);
+            float materialDensity=clamp(
+              .018+dot(sampleColor,vec3(.055,.085,.025)),
+              .012,
+              1.15
+            );
+            float alpha=1.-exp(
+              -stepDepth*verticalDensity*materialDensity*.34
+            );
+            diskLight+=transmission*sampleColor*alpha;
+            // Hot plasma is strongly emissive but only moderately opaque in
+            // visible light; avoid a hard rectangular silhouette edge-on.
+            transmission*=1.-alpha*.28;
+          }
+        }
 
         float invR=1./max(r,HORIZON*1.01);
         float invR2=invR*invR;
@@ -318,6 +416,134 @@
       }
       // Rays still orbiting after the full budget belong to the shadow.
       return vec3(0);
+    }
+    const float KERR_MASS=.3728075814;
+    const float KERR_A=.3504391265;
+    const float KERR_HORIZON=.5;
+    float kerrRadialPotential(float r,float xi,float eta){
+      float delta=r*r-2.*KERR_MASS*r+KERR_A*KERR_A;
+      float p=r*r+KERR_A*KERR_A-KERR_A*xi;
+      return p*p-delta*(eta+(xi-KERR_A)*(xi-KERR_A));
+    }
+    float kerrPolarPotential(float theta,float xi,float eta){
+      float s=max(abs(sin(theta)),1e-4),c=cos(theta);
+      return eta+c*c*(KERR_A*KERR_A-xi*xi/(s*s));
+    }
+    vec3 boyerLindquistDirection(float theta,float phi){
+      float s=sin(theta);
+      return vec3(s*cos(phi),cos(theta),s*sin(phi));
+    }
+    vec3 kerrScene(vec3 local){
+      float frequencyShift=1.;
+      vec3 launch=local;
+      if(falling>.5)launch=fallRay(local,frequencyShift);
+      launch=normalize(launch);
+
+      float r=EH/max(observerU,1e-6);
+      float theta=acos(clamp(radial.y,-1.,1.));
+      float phi=atan(radial.z,radial.x);
+      float st=sin(theta),ct=cos(theta),sp=sin(phi),cp=cos(phi);
+      vec3 er=vec3(st*cp,ct,st*sp);
+      vec3 et=vec3(ct*cp,-st,ct*sp);
+      vec3 ep=vec3(-sp,0.,cp);
+      float nr=dot(launch,er);
+      float nt=dot(launch,et);
+      float np=dot(launch,ep);
+
+      // Constants of motion in a locally non-rotating (ZAMO) tetrad.
+      // The omega term makes prograde and retrograde rays inequivalent.
+      float sigma=r*r+KERR_A*KERR_A*ct*ct;
+      float delta=r*r-2.*KERR_MASS*r+KERR_A*KERR_A;
+      float bigA=(r*r+KERR_A*KERR_A)*(r*r+KERR_A*KERR_A)
+                -KERR_A*KERR_A*delta*st*st;
+      float alpha=sqrt(max(sigma*delta/bigA,1e-8));
+      float omega=2.*KERR_MASS*KERR_A*r/bigA;
+      float gpp=bigA*st*st/sigma;
+      float angularMomentum=sqrt(max(gpp,1e-8))*np;
+      float energy=max(alpha+omega*angularMomentum,1e-5);
+      float xi=angularMomentum/energy;
+      float pTheta=sqrt(sigma)*nt;
+      float eta=(pTheta*pTheta)/(energy*energy)+
+                ct*ct*(xi*xi/max(st*st,1e-8)-KERR_A*KERR_A);
+      float radialSign=nr>=0.?1.:-1.;
+      float polarSign=nt>=0.?1.:-1.;
+      float escapeRadius=max(52.,r+4.);
+
+      for(int i=0;i<224;i++){
+        if(r<=KERR_HORIZON*1.001)return vec3(0);
+        if(r>=escapeRadius&&radialSign>0.){
+          vec3 sky=spaceColor(boyerLindquistDirection(theta,phi));
+          return falling>.5
+            ?shiftedSpectrum(sky,frequencyShift):sky;
+        }
+
+        float radialPotential=max(kerrRadialPotential(r,xi,eta),0.);
+        float polarPotential=max(kerrPolarPotential(theta,xi,eta),0.);
+        float ds=clamp((r-KERR_HORIZON)*.11,.008,.75);
+        float dMino=ds/max(r*r+KERR_A*KERR_A,.2);
+        float oldR=r,oldTheta=theta,oldPhi=phi;
+
+        float dr=radialSign*sqrt(radialPotential)*dMino;
+        float nextR=r+dr;
+        if(kerrRadialPotential(nextR,xi,eta)<0.){
+          radialSign=-radialSign;
+          nextR=r-dr*.35;
+        }
+        r=max(nextR,KERR_HORIZON*.999);
+
+        float dTheta=polarSign*sqrt(polarPotential)*dMino;
+        float nextTheta=theta+dTheta;
+        if(nextTheta<=1e-4||nextTheta>=PI-1e-4||
+           kerrPolarPotential(nextTheta,xi,eta)<0.){
+          polarSign=-polarSign;
+          nextTheta=theta-dTheta*.35;
+        }
+        theta=clamp(nextTheta,1e-4,PI-1e-4);
+
+        float p=oldR*oldR+KERR_A*KERR_A-KERR_A*xi;
+        float oldDelta=max(
+          oldR*oldR-2.*KERR_MASS*oldR+KERR_A*KERR_A,1e-6
+        );
+        float sinTheta=max(abs(sin(oldTheta)),1e-4);
+        float dPhi=xi/(sinTheta*sinTheta)-KERR_A+
+                   KERR_A*p/oldDelta;
+        phi+=dPhi*dMino;
+
+        // The first equatorial crossing is the optically thick disk. A ray
+        // that loops before crossing naturally produces a higher-order image.
+        float oldSide=oldTheta-PI*.5,newSide=theta-PI*.5;
+        if(oldSide*newSide<=0.&&abs(theta-oldTheta)>1e-7){
+          float crossing=abs(oldSide)/
+            max(abs(oldSide)+abs(newSide),1e-7);
+          float hitR=mix(oldR,r,crossing);
+          if(hitR>=RI&&hitR<=RO){
+            float hitPhi=mix(oldPhi,phi,crossing);
+            vec3 disk=plasma(EH/hitR,.92,0.,hitPhi);
+            return falling>.5
+              ?shiftedSpectrum(disk,frequencyShift):disk;
+          }
+        }
+      }
+      return vec3(0);
+    }
+    vec3 kerrSceneBundle(vec3 local,vec3 beamX,vec3 beamY){
+      vec3 center=kerrScene(local);
+
+      // Trace an elliptical sub-pixel beam near strong lensing gradients.
+      // This is the real-time counterpart of DNGR's ray-bundle filtering.
+      float angle=acos(clamp(dot(normalize(local),-radial),-1.,1.));
+      float bundleRadius=clamp(observerU*4.,.035,1.3);
+      float bundleStrength=
+        1.-smoothstep(bundleRadius*.72,bundleRadius,angle);
+      if(bundleStrength<=0.)return center;
+
+      vec3 x=beamX*.5,y=beamY*.5;
+      vec3 filtered=center*.28;
+      filtered+=kerrScene(normalize(local+x+y))*.18;
+      filtered+=kerrScene(normalize(local+x-y))*.18;
+      filtered+=kerrScene(normalize(local-x+y))*.18;
+      filtered+=kerrScene(normalize(local-x-y))*.18;
+      return mix(center,filtered,bundleStrength);
     }
     void main(){
       vec3 observed=normalize(ray);
@@ -340,9 +566,10 @@
       vec2 center=resolution*.5+pan*resolution.y*.5;
       float orbitalPhase=atan(gl_FragCoord.y-center.y,
                               gl_FragCoord.x-center.x);
-      // A smooth Gaussian density profile sampled through the disk atmosphere.
-      // Every layer uses the original geodesic solver; only optical depth varies.
-      vec3 sky=raytracedSpace(v);
+      // A layered volume: a dense midplane, turbulent photosphere and a much
+      // fainter hot atmosphere. Every layer follows the solved geodesics.
+      vec3 disk;
+      vec3 sky=raytracedSpace(v,disk);
       float exteriorWindow=1.,exteriorAttenuation=1.;
       if(interior>0.){
         // All photons emitted outside the horizon share one outward causal
@@ -354,13 +581,8 @@
         exteriorAttenuation=exp(-interior*.1);
         sky*=exteriorWindow*exteriorAttenuation;
       }
-      // Keep the accretion disk on its solved geodesics. As an exterior emitter
-      // it fades from view instead of being geometrically pulled into the hole.
-      vec3 disk=trace(observed,0.,orbitalPhase)*.34;
-      disk+=trace(normalize(ray+vec3(0,.0042,0)), .42,orbitalPhase)*.245;
-      disk+=trace(normalize(ray-vec3(0,.0042,0)),-.42,orbitalPhase)*.245;
-      disk+=trace(normalize(ray+vec3(0,.0084,0)), .84,orbitalPhase)*.13;
-      disk+=trace(normalize(ray-vec3(0,.0084,0)),-.84,orbitalPhase)*.13;
+      // The volume is accumulated front-to-back along the bent ray above. As
+      // an exterior emitter it fades with the rest of the outside universe.
       // The disk stays outside and behind the infaller. Its geodesic images
       // leave view only when their shared outward causal window closes.
       disk*=exteriorWindow*exteriorAttenuation;
@@ -480,6 +702,70 @@
     return t;
   };
 
+  const makeNoiseTexture = (size = 256) => {
+    const data = new Uint8Array(size * size * 4);
+    const frequencies = [7, 11, 19, 47];
+    let state = 0x7f4a7c15;
+    const random = () => {
+      state ^= state << 13;
+      state ^= state >>> 17;
+      state ^= state << 5;
+      return (state >>> 0) / 4294967295;
+    };
+    const fade = (value) => value * value * (3 - 2 * value);
+
+    frequencies.forEach((frequency, channel) => {
+      const lattice = new Float32Array(frequency * frequency);
+      for (let i = 0; i < lattice.length; i++) lattice[i] = random();
+      for (let y = 0; y < size; y++) {
+        const gy = (y / size) * frequency;
+        const iy = Math.floor(gy);
+        const fy = fade(gy - iy);
+        const iy1 = (iy + 1) % frequency;
+        for (let x = 0; x < size; x++) {
+          const gx = (x / size) * frequency;
+          const ix = Math.floor(gx);
+          const fx = fade(gx - ix);
+          const ix1 = (ix + 1) % frequency;
+          const a = lattice[iy * frequency + ix];
+          const b = lattice[iy * frequency + ix1];
+          const c = lattice[iy1 * frequency + ix];
+          const d = lattice[iy1 * frequency + ix1];
+          const top = a + (b - a) * fx;
+          const bottom = c + (d - c) * fx;
+          data[(y * size + x) * 4 + channel] = Math.round(
+            (top + (bottom - top) * fy) * 255,
+          );
+        }
+      }
+    });
+
+    const result = gl.createTexture();
+    gl.activeTexture(gl.TEXTURE3);
+    gl.bindTexture(gl.TEXTURE_2D, result);
+    gl.texParameteri(
+      gl.TEXTURE_2D,
+      gl.TEXTURE_MIN_FILTER,
+      gl.LINEAR_MIPMAP_LINEAR,
+    );
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+    gl.texImage2D(
+      gl.TEXTURE_2D,
+      0,
+      gl.RGBA8,
+      size,
+      size,
+      0,
+      gl.RGBA,
+      gl.UNSIGNED_BYTE,
+      data,
+    );
+    gl.generateMipmap(gl.TEXTURE_2D);
+    return result;
+  };
+
   (async () => {
     const response = await fetch("cache/geodesics.bin");
     if (!response.ok) throw Error("Could not load the geodesic cache.");
@@ -491,8 +777,10 @@
     gl.useProgram(program);
     texture(cache.subarray(0, DC), D, 0);
     texture(cache.subarray(DC), R, 1);
+    makeNoiseTexture();
     gl.uniform1i(gl.getUniformLocation(program, "deflectionTable"), 0);
     gl.uniform1i(gl.getUniformLocation(program, "radiusTable"), 1);
+    gl.uniform1i(gl.getUniformLocation(program, "noiseTexture"), 3);
     const u = Object.fromEntries(
       [
         "resolution",
@@ -514,7 +802,7 @@
       targetYaw: 0,
       pitch: 0.2,
       targetPitch: 0.2,
-      distance: 7.2,
+      distance: 9,
       panX: 0,
       panY: 0,
       lookYaw: 0,
