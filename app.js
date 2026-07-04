@@ -27,7 +27,8 @@
     MIN_DISTANCE = 0.50075,
     INTERIOR_HANDOFF = 1.25,
     INTERIOR_HANDOFF_END = 1.05,
-    MAX_DISTANCE = 12;
+    AUDIO_FAR_DISTANCE = 12,
+    MAX_DISTANCE = 48;
   const DC = D[0] * D[1],
     RC = R[0] * R[1];
   const linear = Boolean(gl.getExtension("OES_texture_float_linear"));
@@ -578,6 +579,8 @@
         ["triangle", 43.5, 0.34],
         ["sawtooth", 58, 0.085],
         ["sine", 87, 0.12],
+        ["triangle", 116, 0.075],
+        ["sine", 174, 0.045],
       ].forEach(([type, frequency, level]) => {
         const oscillator = context.createOscillator();
         const gain = context.createGain();
@@ -638,7 +641,8 @@
         0,
         Math.min(
           1,
-          (MAX_DISTANCE - view.distance) / (MAX_DISTANCE - DISK_INNER_EDGE),
+          (AUDIO_FAR_DISTANCE - view.distance) /
+            (AUDIO_FAR_DISTANCE - DISK_INNER_EDGE),
         ),
       );
       const smoothApproach =
@@ -676,7 +680,7 @@
       if (!soundEnabled) return;
       if (!audio) audio = makeBlackHoleAudio();
       if (!audio) return;
-      if (audio.context.state === "suspended") {
+      if (audio.context.state !== "running") {
         audio.context
           .resume()
           .then(() => updateAudio(true))

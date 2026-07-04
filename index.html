@@ -164,12 +164,13 @@
       }
       @media (max-width: 600px) {
         header {
-          top: 18px;
-          left: 18px;
+          display: none;
         }
         .controls {
           top: 18px;
-          right: 18px;
+          right: auto;
+          left: 50%;
+          transform: translateX(-50%);
         }
         .help {
           right: 18px;
