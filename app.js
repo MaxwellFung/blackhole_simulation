@@ -1,11 +1,9 @@
 (() => {
   "use strict";
 
-  const canvas = document.querySelector("#space");
-  const reset = document.querySelector("#reset");
-  const sound = document.querySelector("#sound");
-  const fall = document.querySelector("#fall");
-  const help = document.querySelector(".help");
+  const [canvas, reset, sound, fall, help] = [
+    "#space", "#reset", "#sound", "#fall", ".help",
+  ].map((selector) => document.querySelector(selector));
   const gl = canvas.getContext("webgl2", {
     alpha: false,
     antialias: false,
@@ -31,6 +29,9 @@
     MAX_DISTANCE = 48;
   const DC = D[0] * D[1],
     RC = R[0] * R[1];
+  const clamp = (value, min = 0, max = 1) =>
+      Math.max(min, Math.min(max, value)),
+    smooth = (value) => value * value * (3 - 2 * value);
   const linear = Boolean(gl.getExtension("OES_texture_float_linear"));
   const sampling = linear
     ? `
@@ -143,18 +144,12 @@
     vec3 plasma(float u,float opacity,float height,float orbitalPhase){
       float r=EH/max(u,1e-5);
       float q=clamp((r-RI)/(RO-RI),0.,1.);
-      // Keplerian advection shears one persistent material field: inner gas
-      // laps the outer gas, producing fluid motion without a fluid simulation.
       float spin=time*(1.72/pow(r,1.5));
       vec2 flow=vec2(
         orbitalPhase/(2.*PI)-spin/(2.*PI),
         q
       );
 
-      // Two mipmapped RGBA texture reads replace the old multi-fBm material.
-      // The second field stays broad and softly warped: no ridged transform,
-      // so the result resembles tumbling molten rock rather than polished
-      // liquid-metal ribbons.
       vec4 broadField=textureLod(
         noiseTexture,
         flow+vec2(height*.009,-height*.018),
@@ -176,9 +171,6 @@
       float outerMix=smoothstep(.46,.88,q);
       float whiteCore=1.-smoothstep(.08,.25,q);
 
-      // Multiplicative log-normal density creates rock-like knots and broad
-      // voids; coherent height coordinates keep the volume from becoming
-      // another visible stack of independent sheets.
       float clumps=exp2(clamp(2.65*(rockField-.5),-1.7,1.45));
       float density=clumps*mix(.42,1.34,molten);
       density*=mix(1.,.46,crust*(1.-molten*.58));
@@ -189,13 +181,9 @@
                          exp2(1.15*(broad-.5));
       density=mix(density,sandyDensity,outerMix);
       density*=vertical;
-      // The inner photosphere is optically thick enough that individual
-      // turbulent cells disappear into a nearly uniform white-hot surface.
       density=mix(density,1.42*vertical,whiteCore*.92);
       density*=2.;
 
-      // A long radial shoulder followed by a steep power falloff produces the
-      // dim, smoky outer edge in the reference instead of a luminous cutout.
       float innerEdge=smoothstep(RI,RI+.10,r);
       float outerEdge=pow(
         max(1.-smoothstep(RO-2.10,RO,r),0.),
@@ -226,9 +214,6 @@
       return tint*opacity*emission*beaming;
     }
     vec3 fallRay(vec3 local,out float frequencyShift){
-      // Exact local aberration for a radial geodesic dropped from rest at
-      // infinity: its speed relative to a stationary Schwarzschild observer is
-      // beta=sqrt(r_s/r). "local" points toward the observed source.
       vec3 observed=normalize(local);
       float beta=sqrt(clamp(observerU,0.,.999999));
       float mu=dot(observed,radial);
@@ -239,12 +224,8 @@
         staticMu*radial+transverse*lapse/denominator
       );
 
-      // Conserved photon energy gives nu_observer/nu_infinity. Directly behind
-      // the infaller this approaches 1/2 at the event horizon, not zero.
       frequencyShift=(1.-beta*staticMu)/max(lapse*lapse,1e-6);
 
-      // Convert the stationary observer's orthonormal radial component to the
-      // Schwarzschild spatial coordinate used by the geodesic integrator.
       float radialPart=dot(stationary,radial);
       return normalize(
         stationary+radialPart*(lapse-1.)*radial
@@ -264,7 +245,6 @@
                       color.b+.42*color.g);
         color=mix(color,hot,blue);
       }
-      // I_nu/nu^3 is invariant along a vacuum null geodesic.
       return color*clamp(g*g*g,.015,12.);
     }
     vec3 trace(vec3 local,float height,float orbitalPhase){
@@ -313,8 +293,6 @@
       if(o0>0.)light+=plasma(u0,o0,height,hitPhi0);
       if(o1>0.)light+=plasma(u1,o1,height,hitPhi1);
 
-      // A low-energy sheath gives the optically thick surface a soft edge
-      // without changing the solved geodesic silhouette.
       float halo0=v0?pulse(UO*.965,(EH/RI)*1.015,u0,max(w0,.006)):0.;
       float halo1=v1?pulse(UO*.965,(EH/RI)*1.015,u1,max(w1,.006)):0.;
       light+=vec3(1.,.25,.045)*.11*(halo0+halo1);
@@ -337,9 +315,6 @@
       return sky;
     }
     vec3 raytracedSpace(vec3 local,out vec3 diskLight){
-      // This is the numerical light-path integration from the reference
-      // renderer, expressed in the same Schwarzschild units as the lookup
-      // geometry. There is no screen-space lens mask or circular blend.
       const float HORIZON=EH;
       diskLight=vec3(0);
       float transmission=1.;
@@ -361,17 +336,12 @@
         float h2=max(dot(pos,pos)-radialSpeed*radialSpeed,0.);
         float ds=clamp((r-HORIZON)*.1,.035,.68);
         if(r>15.)ds=min(ds,1.);
-        // A stable low-discrepancy offset turns coherent ray-march contours
-        // into sub-pixel grain that the existing optical filter removes.
         float sampleOffset=fract(
           marchSeed+float(i)*.61803398875
         )-.5;
         vec3 materialPos=pos+dir*ds*sampleOffset;
         float cylindricalR=length(materialPos.xz);
 
-        // Integrate emission and extinction through a continuous, flared
-        // cylindrical volume. This remains well-defined when the camera lies
-        // exactly in the disk plane, unlike equatorial sheet intersections.
         if(cylindricalR>=RI&&cylindricalR<=RO){
           float diskQ=clamp((cylindricalR-RI)/(RO-RI),0.,1.);
           float scaleHeight=mix(.100,.380,pow(diskQ,.78));
@@ -402,8 +372,6 @@
               -stepDepth*verticalDensity*materialDensity*.34
             );
             diskLight+=transmission*sampleColor*alpha;
-            // Hot plasma is strongly emissive but only moderately opaque in
-            // visible light; avoid a hard rectangular silhouette edge-on.
             transmission*=1.-alpha*.28;
           }
         }
@@ -414,7 +382,6 @@
         dir=normalize(dir+accel*ds);
         pos+=dir*ds;
       }
-      // Rays still orbiting after the full budget belong to the shadow.
       return vec3(0);
     }
     const float KERR_MASS=.3728075814;
@@ -450,8 +417,6 @@
       float nt=dot(launch,et);
       float np=dot(launch,ep);
 
-      // Constants of motion in a locally non-rotating (ZAMO) tetrad.
-      // The omega term makes prograde and retrograde rays inequivalent.
       float sigma=r*r+KERR_A*KERR_A*ct*ct;
       float delta=r*r-2.*KERR_MASS*r+KERR_A*KERR_A;
       float bigA=(r*r+KERR_A*KERR_A)*(r*r+KERR_A*KERR_A)
@@ -509,8 +474,6 @@
                    KERR_A*p/oldDelta;
         phi+=dPhi*dMino;
 
-        // The first equatorial crossing is the optically thick disk. A ray
-        // that loops before crossing naturally produces a higher-order image.
         float oldSide=oldTheta-PI*.5,newSide=theta-PI*.5;
         if(oldSide*newSide<=0.&&abs(theta-oldTheta)>1e-7){
           float crossing=abs(oldSide)/
@@ -529,8 +492,6 @@
     vec3 kerrSceneBundle(vec3 local,vec3 beamX,vec3 beamY){
       vec3 center=kerrScene(local);
 
-      // Trace an elliptical sub-pixel beam near strong lensing gradients.
-      // This is the real-time counterpart of DNGR's ray-bundle filtering.
       float angle=acos(clamp(dot(normalize(local),-radial),-1.,1.));
       float bundleRadius=clamp(observerU*4.,.035,1.3);
       float bundleStrength=
@@ -549,9 +510,6 @@
       vec3 observed=normalize(ray);
       vec3 v=observed;
       if(interior>0.){
-        // Compress the entire exterior image continuously toward the outward
-        // direction. Sampling a wider source angle for each observed angle
-        // creates optical flow rather than a stationary image behind a mask.
         float mu=clamp(dot(observed,radial),-1.,1.);
         float observedAngle=acos(mu);
         vec3 transverse=observed-mu*radial;
@@ -566,14 +524,10 @@
       vec2 center=resolution*.5+pan*resolution.y*.5;
       float orbitalPhase=atan(gl_FragCoord.y-center.y,
                               gl_FragCoord.x-center.x);
-      // A layered volume: a dense midplane, turbulent photosphere and a much
-      // fainter hot atmosphere. Every layer follows the solved geodesics.
       vec3 disk;
       vec3 sky=raytracedSpace(v,disk);
       float exteriorWindow=1.,exteriorAttenuation=1.;
       if(interior>0.){
-        // All photons emitted outside the horizon share one outward causal
-        // window. The sky is angularly compressed above; the disk is not.
         float closure=1.-exp(-interior*.32);
         float cone=mix(PI,.012,closure);
         float angle=acos(clamp(dot(observed,radial),-1.,1.));
@@ -581,10 +535,6 @@
         exteriorAttenuation=exp(-interior*.1);
         sky*=exteriorWindow*exteriorAttenuation;
       }
-      // The volume is accumulated front-to-back along the bent ray above. As
-      // an exterior emitter it fades with the rest of the outside universe.
-      // The disk stays outside and behind the infaller. Its geodesic images
-      // leave view only when their shared outward causal window closes.
       disk*=exteriorWindow*exteriorAttenuation;
       vec3 hdr=sky+disk;
       vec3 mapped=1.-exp(-hdr*.72);
@@ -617,16 +567,12 @@
                 texture(scene,at-vec2(1,0)*px).r),
             texture(scene,at+vec2(0,1)*px).r),
         texture(scene,at-vec2(0,1)*px).r);
-      // Extended plasma blooms. Isolated point stars retain compact halos
-      // instead of exposing the sparse bloom kernel as a cross.
       float bloomSupport=smoothstep(.018,.11,nearby);
       return max(c-vec3(.055),0.)*bloomSupport;
     }
     void main(){
       vec2 px=1./resolution;
       vec3 base=texture(scene,uv).rgb;
-      // Optical scattering inside the hot gas removes sub-pixel geometric
-      // separations while leaving the original lensing solution underneath.
       vec3 meld=base*.28;
       meld+=(texture(scene,uv+vec2( 2.,0.)*px).rgb
             +texture(scene,uv+vec2(-2.,0.)*px).rgb
@@ -669,37 +615,34 @@
       throw Error(gl.getShaderInfoLog(shader));
     return shader;
   };
-  const program = gl.createProgram();
-  gl.attachShader(program, compile(gl.VERTEX_SHADER, vertex));
-  gl.attachShader(program, compile(gl.FRAGMENT_SHADER, fragment));
-  gl.linkProgram(program);
-  if (!gl.getProgramParameter(program, gl.LINK_STATUS))
-    return fail(gl.getProgramInfoLog(program));
-  const postProgram = gl.createProgram();
-  gl.attachShader(postProgram, compile(gl.VERTEX_SHADER, postVertex));
-  gl.attachShader(postProgram, compile(gl.FRAGMENT_SHADER, postFragment));
-  gl.linkProgram(postProgram);
-  if (!gl.getProgramParameter(postProgram, gl.LINK_STATUS))
-    return fail(gl.getProgramInfoLog(postProgram));
+  const makeProgram = (vertexSource, fragmentSource) => {
+    const result = gl.createProgram();
+    gl.attachShader(result, compile(gl.VERTEX_SHADER, vertexSource));
+    gl.attachShader(result, compile(gl.FRAGMENT_SHADER, fragmentSource));
+    gl.linkProgram(result);
+    if (!gl.getProgramParameter(result, gl.LINK_STATUS))
+      return fail(gl.getProgramInfoLog(result));
+    return result;
+  };
+  const program = makeProgram(vertex, fragment);
+  if (!program) return;
+  const postProgram = makeProgram(postVertex, postFragment);
+  if (!postProgram) return;
 
+  const setTextureParameters = (min, mag, wrap) => {
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, min);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, mag);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, wrap);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, wrap);
+  };
   const texture = (data, [w, h], unit) => {
-    const t = gl.createTexture();
+    const result = gl.createTexture(),
+      filter = linear ? gl.LINEAR : gl.NEAREST;
     gl.activeTexture(gl.TEXTURE0 + unit);
-    gl.bindTexture(gl.TEXTURE_2D, t);
-    gl.texParameteri(
-      gl.TEXTURE_2D,
-      gl.TEXTURE_MIN_FILTER,
-      linear ? gl.LINEAR : gl.NEAREST,
-    );
-    gl.texParameteri(
-      gl.TEXTURE_2D,
-      gl.TEXTURE_MAG_FILTER,
-      linear ? gl.LINEAR : gl.NEAREST,
-    );
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.bindTexture(gl.TEXTURE_2D, result);
+    setTextureParameters(filter, filter, gl.CLAMP_TO_EDGE);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, w, h, 0, gl.RED, gl.FLOAT, data);
-    return t;
+    return result;
   };
 
   const makeNoiseTexture = (size = 256) => {
@@ -712,20 +655,18 @@
       state ^= state << 5;
       return (state >>> 0) / 4294967295;
     };
-    const fade = (value) => value * value * (3 - 2 * value);
-
     frequencies.forEach((frequency, channel) => {
       const lattice = new Float32Array(frequency * frequency);
       for (let i = 0; i < lattice.length; i++) lattice[i] = random();
       for (let y = 0; y < size; y++) {
         const gy = (y / size) * frequency;
         const iy = Math.floor(gy);
-        const fy = fade(gy - iy);
+        const fy = smooth(gy - iy);
         const iy1 = (iy + 1) % frequency;
         for (let x = 0; x < size; x++) {
           const gx = (x / size) * frequency;
           const ix = Math.floor(gx);
-          const fx = fade(gx - ix);
+          const fx = smooth(gx - ix);
           const ix1 = (ix + 1) % frequency;
           const a = lattice[iy * frequency + ix];
           const b = lattice[iy * frequency + ix1];
@@ -743,14 +684,7 @@
     const result = gl.createTexture();
     gl.activeTexture(gl.TEXTURE3);
     gl.bindTexture(gl.TEXTURE_2D, result);
-    gl.texParameteri(
-      gl.TEXTURE_2D,
-      gl.TEXTURE_MIN_FILTER,
-      gl.LINEAR_MIPMAP_LINEAR,
-    );
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+    setTextureParameters(gl.LINEAR_MIPMAP_LINEAR, gl.LINEAR, gl.REPEAT);
     gl.texImage2D(
       gl.TEXTURE_2D,
       0,
@@ -813,9 +747,6 @@
     const view = { ...defaults },
       pointers = new Map();
 
-    // A procedural, continuously evolving roar avoids the obvious repetition of
-    // a short audio loop. It begins after the first user gesture, as required by
-    // browser autoplay policies.
     let audio,
       fallMode = false,
       fallSpeed = 0.04,
@@ -823,10 +754,13 @@
       interiorSpeed = 0.4,
       lastAudioUpdate = -Infinity,
       soundEnabled = false;
+    const audioMixOverride = new URLSearchParams(location.search).get("audio");
     const useMobileAudioMix =
-      Boolean(navigator.userAgentData?.mobile) ||
-      /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) ||
-      matchMedia("(pointer: coarse) and (max-width: 900px)").matches;
+      audioMixOverride === "mobile" ||
+      (audioMixOverride !== "desktop" &&
+        (Boolean(navigator.userAgentData?.mobile) ||
+          /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) ||
+          matchMedia("(pointer: coarse) and (max-width: 900px)").matches));
     const makeBlackHoleAudio = () => {
       const AudioContext = window.AudioContext || window.webkitAudioContext;
       if (!AudioContext) {
@@ -843,9 +777,6 @@
       const shear = context.createGain();
       const shearFilter = context.createBiquadFilter();
       const compressor = context.createDynamicsCompressor();
-      // Phone speakers discard most of the desktop mix's sub-bass. Shift the
-      // whole spectrum upward on mobile and give it enough level to remain
-      // audible through a small built-in speaker.
       const octaveDown = useMobileAudioMix ? 2 : 0.5;
       const outputBoost = useMobileAudioMix ? 2.2 : 1;
 
@@ -889,7 +820,6 @@
         oscillator.start();
       });
 
-      // Integrated random samples create a heavy, non-hissy turbulent bed.
       const noiseBuffer = context.createBuffer(
         1,
         context.sampleRate * 4,
@@ -910,7 +840,6 @@
       noiseSplit.connect(shear);
       noise.start();
 
-      // Slow irregular "pressure" oscillation keeps the roar alive.
       const pressure = context.createOscillator();
       const pressureDepth = context.createGain();
       pressure.type = "sine";
@@ -936,28 +865,16 @@
       const now = audio.context.currentTime;
       if (!immediate && fallMode && now - lastAudioUpdate < 0.06) return;
       lastAudioUpdate = now;
-      const diskApproach = Math.max(
-        0,
-        Math.min(
-          1,
-          (AUDIO_FAR_DISTANCE - view.distance) /
-            (AUDIO_FAR_DISTANCE - DISK_INNER_EDGE),
-        ),
+      const diskApproach = clamp(
+        (AUDIO_FAR_DISTANCE - view.distance) /
+          (AUDIO_FAR_DISTANCE - DISK_INNER_EDGE),
       );
-      const smoothApproach =
-        diskApproach * diskApproach * (3 - 2 * diskApproach);
+      const smoothApproach = smooth(diskApproach);
       const rise = (Math.exp(smoothApproach * 4.6) - 1) / (Math.exp(4.6) - 1);
-      const horizonDistance = Math.max(
-        0,
-        Math.min(
-          1,
-          (view.distance - MIN_DISTANCE) / (DISK_INNER_EDGE - MIN_DISTANCE),
-        ),
+      const horizonDistance = clamp(
+        (view.distance - MIN_DISTANCE) / (DISK_INNER_EDGE - MIN_DISTANCE),
       );
-      // The inner disk is the acoustic peak. Inside it, a smooth turning point
-      // rolls the roar down to a muffled residual hum at the horizon.
-      const horizonFade =
-        horizonDistance * horizonDistance * (3 - 2 * horizonDistance);
+      const horizonFade = smooth(horizonDistance);
       const intensity = rise * horizonFade;
       const ambientFloor = 0.007 + 0.021 * horizonFade;
       const ramp = immediate ? 0.01 : 0.12;
@@ -1027,10 +944,7 @@
       gl.viewport(0, 0, w, h);
       gl.activeTexture(gl.TEXTURE2);
       gl.bindTexture(gl.TEXTURE_2D, accTexture);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      setTextureParameters(gl.LINEAR, gl.LINEAR, gl.CLAMP_TO_EDGE);
       gl.texImage2D(
         gl.TEXTURE_2D,
         0,
@@ -1060,16 +974,10 @@
       const ease = Math.min(1, dt * 5);
       if (fallMode) {
         if (view.distance > MIN_DISTANCE) {
-          const proximity = Math.max(
-            0,
-            Math.min(
-              1,
-              (defaults.distance - view.distance) /
-                (defaults.distance - MIN_DISTANCE),
-            ),
+          const proximity = clamp(
+            (defaults.distance - view.distance) /
+              (defaults.distance - MIN_DISTANCE),
           );
-          // Accumulate radial velocity so the image accelerates through the
-          // final approach rather than asymptotically freezing at the horizon.
           fallSpeed = Math.min(
             0.4,
             fallSpeed + dt * (0.006 + 0.12 * proximity * proximity),
@@ -1077,17 +985,11 @@
           zoomBy(Math.exp(-dt * fallSpeed));
         }
         if (view.distance <= INTERIOR_HANDOFF) {
-          // Ease one continuous interior depth into the exterior trajectory.
-          // There is no second veil curve to create a visible compositing seam.
-          const handoff = Math.max(
-            0,
-            Math.min(
-              1,
-              (INTERIOR_HANDOFF - view.distance) /
-                (INTERIOR_HANDOFF - INTERIOR_HANDOFF_END),
-            ),
+          const handoff = clamp(
+            (INTERIOR_HANDOFF - view.distance) /
+              (INTERIOR_HANDOFF - INTERIOR_HANDOFF_END),
           );
-          const handoffEase = handoff * handoff * (3 - 2 * handoff);
+          const handoffEase = smooth(handoff);
           interiorSpeed = Math.min(
             0.65,
             Math.max(interiorSpeed, fallSpeed) + dt * 0.015,
@@ -1146,26 +1048,20 @@
       };
     };
     const zoomBy = (factor) => {
-      // Scale altitude above the horizon rather than the absolute radius. This
-      // gives the final approach enough precision while never crossing r = 0.5.
       const altitude = (view.distance - EVENT_HORIZON) * factor;
       view.distance =
         EVENT_HORIZON +
-        Math.max(
+        clamp(
+          altitude,
           MIN_DISTANCE - EVENT_HORIZON,
-          Math.min(MAX_DISTANCE - EVENT_HORIZON, altitude),
+          MAX_DISTANCE - EVENT_HORIZON,
         );
     };
     const updateChrome = () => {
-      const horizonDistance = Math.max(
-        0,
-        Math.min(
-          1,
-          (view.distance - MIN_DISTANCE) / (DISK_INNER_EDGE - MIN_DISTANCE),
-        ),
+      const horizonDistance = clamp(
+        (view.distance - MIN_DISTANCE) / (DISK_INNER_EDGE - MIN_DISTANCE),
       );
-      const opacity =
-        horizonDistance * horizonDistance * (3 - 2 * horizonDistance);
+      const opacity = smooth(horizonDistance);
       document.body.style.setProperty("--ui-opacity", opacity.toFixed(3));
       document.body.classList.toggle("ui-hidden", opacity < 0.035);
     };
@@ -1173,21 +1069,16 @@
       fallMode = enabled;
       if (fallMode && view.distance <= MIN_DISTANCE + 0.002)
         view.distance = defaults.distance;
+      fallSpeed = 0.04;
+      interiorDepth = 0;
+      interiorSpeed = 0.4;
       if (fallMode) {
-        fallSpeed = 0.04;
-        interiorDepth = 0;
-        interiorSpeed = 0.4;
         view.panX = 0;
         view.panY = 0;
         awakenAudio();
       } else {
-        fallSpeed = 0.04;
-        interiorDepth = 0;
-        interiorSpeed = 0.4;
-        view.lookYaw = 0;
-        view.targetLookYaw = 0;
-        view.lookPitch = 0;
-        view.targetLookPitch = 0;
+        view.lookYaw = view.targetLookYaw = 0;
+        view.lookPitch = view.targetLookPitch = 0;
       }
       document.body.classList.toggle("falling", fallMode);
       fall.textContent = fallMode ? "Exit fall" : "Fall mode";
@@ -1212,12 +1103,11 @@
       pointers.set(e.pointerId, point);
       const next = readGesture();
       if (fallMode) {
-        // The trajectory owns position in fall mode; dragging only turns the
-        // astronaut's head. Yaw is deliberately unbounded for looking behind.
         view.targetLookYaw -= (point.x - old.x) * 0.006;
-        view.targetLookPitch = Math.max(
+        view.targetLookPitch = clamp(
+          view.targetLookPitch + (point.y - old.y) * 0.0045,
           -1.5,
-          Math.min(1.5, view.targetLookPitch + (point.y - old.y) * 0.0045),
+          1.5,
         );
         gesture = next;
       } else if (next && gesture) {
@@ -1233,10 +1123,7 @@
           view.panY -= (dy * 2) / innerHeight;
         } else {
           view.targetYaw -= dx * 0.0045;
-          view.targetPitch = Math.max(
-            -1.42,
-            Math.min(1.42, view.targetPitch + dy * 0.0035),
-          );
+          view.targetPitch = clamp(view.targetPitch + dy * 0.0035, -1.42, 1.42);
         }
       }
       moving();

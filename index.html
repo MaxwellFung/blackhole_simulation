@@ -223,8 +223,7 @@
           <stop offset=".55" stop-color="#dae0df" stop-opacity=".55" />
           <stop offset="1" stop-color="#11181d" stop-opacity=".9" />
         </linearGradient>
-      </defs>
-      <g class="left-arm">
+        <g id="arm">
         <path
           d="M-55 1030 C22 934 75 851 128 761 C164 701 201 654 238 622 C258 605 290 616 300 640 C309 663 296 683 276 700 C235 738 211 798 192 866 C175 926 149 984 116 1030Z"
           fill="url(#suit-fabric)"
@@ -257,82 +256,38 @@
             stroke-width="8"
           />
         </g>
-      </g>
+        </g>
+      </defs>
+      <use class="left-arm" href="#arm" />
       <g transform="translate(1000 0) scale(-1 1)">
-        <g class="right-arm">
+        <use class="right-arm" href="#arm" />
+      </g>
+      <defs>
+        <g id="leg">
           <path
-            d="M-55 1030 C22 934 75 851 128 761 C164 701 201 654 238 622 C258 605 290 616 300 640 C309 663 296 683 276 700 C235 738 211 798 192 866 C175 926 149 984 116 1030Z"
+            d="M326 1050 C344 964 362 875 390 788 C402 751 447 745 467 777 C480 799 469 837 463 869 L438 1050Z"
             fill="url(#suit-fabric)"
           />
           <path
-            d="M116 799 C145 806 173 821 198 842 L184 892 C155 871 125 855 95 850Z"
+            d="M375 817 C397 829 426 836 456 834 L465 875 C429 881 396 874 364 858Z"
             fill="#c94d35"
-            opacity=".85"
+            opacity=".82"
           />
           <path
-            d="M205 686 C232 707 250 725 265 746 L231 787 C211 767 190 750 166 737Z"
-            fill="url(#joint-fabric)"
+            d="M374 783 C376 747 395 716 425 705 C454 695 475 713 471 743 L463 798Z"
+            fill="#2d383e"
           />
-          <g transform="translate(274 651) rotate(39)">
-            <path
-              d="M-39 22 C-49-7-36-43-7-56 C20-68 48-53 54-24 L58 22 C54 51 28 68-2 62 C-22 58-34 43-39 22Z"
-              fill="url(#glove-shade)"
-            />
-            <path
-              d="M-25-28 L-41-53 M-6-39 L-14-68 M14-38 L17-67 M31-28 L43-53"
-              fill="none"
-              stroke="#dce0dc"
-              stroke-width="13"
-              stroke-linecap="round"
-            />
-            <path
-              d="M-30 26 C-6 34 21 33 47 17"
-              fill="none"
-              stroke="#687276"
-              stroke-width="8"
-            />
-          </g>
+          <path
+            d="M379 746 C399 755 432 756 466 746"
+            fill="none"
+            stroke="#909a9c"
+            stroke-width="10"
+          />
         </g>
-      </g>
+      </defs>
       <g class="legs">
-        <path
-          d="M326 1050 C344 964 362 875 390 788 C402 751 447 745 467 777 C480 799 469 837 463 869 L438 1050Z"
-          fill="url(#suit-fabric)"
-        />
-        <path
-          d="M674 1050 C656 964 638 875 610 788 C598 751 553 745 533 777 C520 799 531 837 537 869 L562 1050Z"
-          fill="url(#suit-fabric)"
-        />
-        <path
-          d="M375 817 C397 829 426 836 456 834 L465 875 C429 881 396 874 364 858Z"
-          fill="#c94d35"
-          opacity=".82"
-        />
-        <path
-          d="M625 817 C603 829 574 836 544 834 L535 875 C571 881 604 874 636 858Z"
-          fill="#c94d35"
-          opacity=".82"
-        />
-        <path
-          d="M374 783 C376 747 395 716 425 705 C454 695 475 713 471 743 L463 798Z"
-          fill="#2d383e"
-        />
-        <path
-          d="M626 783 C624 747 605 716 575 705 C546 695 525 713 529 743 L537 798Z"
-          fill="#2d383e"
-        />
-        <path
-          d="M379 746 C399 755 432 756 466 746"
-          fill="none"
-          stroke="#909a9c"
-          stroke-width="10"
-        />
-        <path
-          d="M621 746 C601 755 568 756 534 746"
-          fill="none"
-          stroke="#909a9c"
-          stroke-width="10"
-        />
+        <use href="#leg" />
+        <use href="#leg" transform="translate(1000 0) scale(-1 1)" />
       </g>
       <ellipse class="visor" cx="500" cy="490" rx="535" ry="570" />
     </svg>
