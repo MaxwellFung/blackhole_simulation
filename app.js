@@ -3,6 +3,9 @@
 
   const canvas = document.querySelector("#space");
   const reset = document.querySelector("#reset");
+  const sound = document.querySelector("#sound");
+  const fall = document.querySelector("#fall");
+  const help = document.querySelector(".help");
   const gl = canvas.getContext("webgl2", {
     alpha: false,
     antialias: false,
@@ -18,7 +21,13 @@
   if (!gl) return fail("WebGL 2 is required.");
 
   const D = [512, 512],
-    R = [256, 128];
+    R = [256, 128],
+    EVENT_HORIZON = 0.5,
+    DISK_INNER_EDGE = 1.5,
+    MIN_DISTANCE = 0.50075,
+    INTERIOR_HANDOFF = 1.25,
+    INTERIOR_HANDOFF_END = 1.05,
+    MAX_DISTANCE = 12;
   const DC = D[0] * D[1],
     RC = R[0] * R[1];
   const linear = Boolean(gl.getExtension("OES_texture_float_linear"));
@@ -53,7 +62,7 @@
 
   const vertex = `#version 300 es
     precision highp float;
-    uniform vec2 resolution,pan,jitter;
+    uniform vec2 resolution,pan,jitter,look;
     uniform vec3 camera;
     flat out vec3 radial;
     flat out float observerU,lapse;
@@ -65,6 +74,11 @@
       radial=vec3(sin(y)*cos(q),sin(q),cos(y)*cos(q));
       observerU=.5/camera.z;lapse=sqrt(1.-observerU);
       vec3 f=-radial,r=normalize(cross(f,vec3(0,1,0))),u=cross(r,f);
+      float cy=cos(look.x),sy=sin(look.x),cp=cos(look.y),sp=sin(look.y);
+      vec3 turned=cy*f+sy*r;
+      r=cy*r-sy*f;
+      f=cp*turned+sp*u;
+      u=cp*u-sp*turned;
       vec2 s=vec2(p.x*resolution.x/resolution.y,p.y)-pan+2.*jitter/resolution.y;
       ray=f+.62*(s.x*r+s.y*u);
     }`;
@@ -76,7 +90,7 @@
     in vec3 ray;
     uniform sampler2D deflectionTable,radiusTable;
     uniform vec2 resolution,pan;
-    uniform float time;
+    uniform float time,falling,interior;
     out vec4 color;
     const float PI=3.141592653589793,MU=4./27.,EH=.5,RI=1.5,RO=2.8;
     const float UO=EH/RO,CULL=.8*UO*UO*(1.-UO),GUARD=.85*UO*UO*(1.-UO);
@@ -168,9 +182,54 @@
       float beaming=.78+.32*sin(orbitalPhase+1.1);
       return tint*opacity*density*(1.15+5.8*hot)*beaming;
     }
+    vec3 fallRay(vec3 local,out float frequencyShift){
+      // Exact local aberration for a radial geodesic dropped from rest at
+      // infinity: its speed relative to a stationary Schwarzschild observer is
+      // beta=sqrt(r_s/r). "local" points toward the observed source.
+      vec3 observed=normalize(local);
+      float beta=sqrt(clamp(observerU,0.,.999999));
+      float mu=dot(observed,radial);
+      float denominator=max(1.+beta*mu,1e-6);
+      float staticMu=(mu+beta)/denominator;
+      vec3 transverse=observed-mu*radial;
+      vec3 stationary=normalize(
+        staticMu*radial+transverse*lapse/denominator
+      );
+
+      // Conserved photon energy gives nu_observer/nu_infinity. Directly behind
+      // the infaller this approaches 1/2 at the event horizon, not zero.
+      frequencyShift=(1.-beta*staticMu)/max(lapse*lapse,1e-6);
+
+      // Convert the stationary observer's orthonormal radial component to the
+      // Schwarzschild spatial coordinate used by the geodesic integrator.
+      float radialPart=dot(stationary,radial);
+      return normalize(
+        stationary+radialPart*(lapse-1.)*radial
+      );
+    }
+    vec3 shiftedSpectrum(vec3 color,float shift){
+      float g=clamp(shift,.12,3.);
+      if(g<1.){
+        vec3 red=vec3(color.r+.5*color.g+.12*color.b,
+                      .55*color.g+.1*color.b,
+                      .18*color.b);
+        color=mix(red,color,g);
+      }else{
+        float blue=1.-1./g;
+        vec3 hot=vec3(.62*color.r,
+                      color.g+.18*color.r,
+                      color.b+.42*color.g);
+        color=mix(color,hot,blue);
+      }
+      // I_nu/nu^3 is invariant along a vacuum null geodesic.
+      return color*clamp(g*g*g,.015,12.);
+    }
     vec3 trace(vec3 local,float height,float orbitalPhase){
       float lr=dot(local,radial);
-      vec3 d=local+lr*(lapse-1.)*radial;
+      float shift=1.;
+      vec3 d;
+      if(falling>.5)d=fallRay(local,shift);
+      else d=local+lr*(lapse-1.)*radial;
       float delta=acos(clamp(dot(radial,normalize(d)),-1.,1.));
       float ud=-observerU/tan(delta),e=ud*ud+observerU*observerU*(1.-observerU);
       if(observerU<UO&&e<CULL||e<MU&&observerU>2./3.)return vec3(0);
@@ -209,6 +268,8 @@
       float halo0=v0?pulse(UO*.965,(EH/RI)*1.015,u0,max(w0,.006)):0.;
       float halo1=v1?pulse(UO*.965,(EH/RI)*1.015,u1,max(w1,.006)):0.;
       light+=vec3(1.,.25,.045)*.11*(halo0+halo1);
+      if(falling>.5)
+        light=shiftedSpectrum(light,clamp(shift,.35,1.8));
       return light;
     }
     vec3 spaceColor(vec3 d){
@@ -231,11 +292,17 @@
       // geometry. There is no screen-space lens mask or circular blend.
       const float HORIZON=EH;
       vec3 pos=radial*(EH/max(observerU,1e-6));
-      vec3 dir=normalize(local);
+      float frequencyShift=1.;
+      vec3 dir;
+      if(falling>.5)dir=fallRay(local,frequencyShift);
+      else dir=normalize(local);
       for(int i=0;i<176;i++){
         float r=length(pos);
-        if(r<HORIZON*1.01)return vec3(0);
-        if(r>46.&&dot(pos,dir)>0.)return spaceColor(dir);
+        if(r<HORIZON*1.001)return vec3(0);
+        if(r>46.&&dot(pos,dir)>0.){
+          vec3 sky=spaceColor(dir);
+          return falling>.5?shiftedSpectrum(sky,frequencyShift):sky;
+        }
 
         float radialSpeed=dot(pos,dir);
         float h2=max(dot(pos,pos)-radialSpeed*radialSpeed,0.);
@@ -252,18 +319,51 @@
       return vec3(0);
     }
     void main(){
-      vec3 v=normalize(ray);
+      vec3 observed=normalize(ray);
+      vec3 v=observed;
+      if(interior>0.){
+        // Compress the entire exterior image continuously toward the outward
+        // direction. Sampling a wider source angle for each observed angle
+        // creates optical flow rather than a stationary image behind a mask.
+        float mu=clamp(dot(observed,radial),-1.,1.);
+        float observedAngle=acos(mu);
+        vec3 transverse=observed-mu*radial;
+        float transverseLength=length(transverse);
+        if(transverseLength>1e-6){
+          float angularScale=max(exp(-interior*.22),.025);
+          float sourceAngle=min(observedAngle/angularScale,PI);
+          v=cos(sourceAngle)*radial+
+            sin(sourceAngle)*(transverse/transverseLength);
+        }
+      }
       vec2 center=resolution*.5+pan*resolution.y*.5;
       float orbitalPhase=atan(gl_FragCoord.y-center.y,
                               gl_FragCoord.x-center.x);
       // A smooth Gaussian density profile sampled through the disk atmosphere.
       // Every layer uses the original geodesic solver; only optical depth varies.
-      vec3 hdr=raytracedSpace(v);
-      hdr+=trace(v,0.,orbitalPhase)*.34;
-      hdr+=trace(normalize(ray+vec3(0,.0042,0)), .42,orbitalPhase)*.245;
-      hdr+=trace(normalize(ray-vec3(0,.0042,0)),-.42,orbitalPhase)*.245;
-      hdr+=trace(normalize(ray+vec3(0,.0084,0)), .84,orbitalPhase)*.13;
-      hdr+=trace(normalize(ray-vec3(0,.0084,0)),-.84,orbitalPhase)*.13;
+      vec3 sky=raytracedSpace(v);
+      float exteriorWindow=1.,exteriorAttenuation=1.;
+      if(interior>0.){
+        // All photons emitted outside the horizon share one outward causal
+        // window. The sky is angularly compressed above; the disk is not.
+        float closure=1.-exp(-interior*.32);
+        float cone=mix(PI,.012,closure);
+        float angle=acos(clamp(dot(observed,radial),-1.,1.));
+        exteriorWindow=1.-smoothstep(cone*.78,cone,angle);
+        exteriorAttenuation=exp(-interior*.1);
+        sky*=exteriorWindow*exteriorAttenuation;
+      }
+      // Keep the accretion disk on its solved geodesics. As an exterior emitter
+      // it fades from view instead of being geometrically pulled into the hole.
+      vec3 disk=trace(observed,0.,orbitalPhase)*.34;
+      disk+=trace(normalize(ray+vec3(0,.0042,0)), .42,orbitalPhase)*.245;
+      disk+=trace(normalize(ray-vec3(0,.0042,0)),-.42,orbitalPhase)*.245;
+      disk+=trace(normalize(ray+vec3(0,.0084,0)), .84,orbitalPhase)*.13;
+      disk+=trace(normalize(ray-vec3(0,.0084,0)),-.84,orbitalPhase)*.13;
+      // The disk stays outside and behind the infaller. Its geodesic images
+      // leave view only when their shared outward causal window closes.
+      disk*=exteriorWindow*exteriorAttenuation;
+      vec3 hdr=sky+disk;
       vec3 mapped=1.-exp(-hdr*.72);
       mapped=pow(mapped,vec3(.82));
       float grain=hash21(gl_FragCoord.xy)-.5;
@@ -393,10 +493,16 @@
     gl.uniform1i(gl.getUniformLocation(program, "deflectionTable"), 0);
     gl.uniform1i(gl.getUniformLocation(program, "radiusTable"), 1);
     const u = Object.fromEntries(
-      ["resolution", "pan", "jitter", "camera", "time"].map((name) => [
-        name,
-        gl.getUniformLocation(program, name),
-      ]),
+      [
+        "resolution",
+        "pan",
+        "jitter",
+        "camera",
+        "look",
+        "time",
+        "falling",
+        "interior",
+      ].map((name) => [name, gl.getUniformLocation(program, name)]),
     );
     gl.useProgram(postProgram);
     gl.uniform1i(gl.getUniformLocation(postProgram, "scene"), 2);
@@ -410,16 +516,180 @@
       distance: 7.2,
       panX: 0,
       panY: 0,
+      lookYaw: 0,
+      targetLookYaw: 0,
+      lookPitch: 0,
+      targetLookPitch: 0,
     };
     const view = { ...defaults },
       pointers = new Map();
+
+    // A procedural, continuously evolving roar avoids the obvious repetition of
+    // a short audio loop. It begins after the first user gesture, as required by
+    // browser autoplay policies.
+    let audio,
+      fallMode = false,
+      fallSpeed = 0.04,
+      interiorDepth = 0,
+      interiorSpeed = 0.4,
+      lastAudioUpdate = -Infinity,
+      soundEnabled = false;
+    const makeBlackHoleAudio = () => {
+      const AudioContext = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContext) {
+        sound.hidden = true;
+        return null;
+      }
+
+      const context = new AudioContext();
+      const master = context.createGain();
+      const drone = context.createGain();
+      const droneFilter = context.createBiquadFilter();
+      const turbulence = context.createGain();
+      const turbulenceFilter = context.createBiquadFilter();
+      const shear = context.createGain();
+      const shearFilter = context.createBiquadFilter();
+      const compressor = context.createDynamicsCompressor();
+
+      master.gain.value = 0;
+      drone.gain.value = 0.7;
+      droneFilter.type = "lowpass";
+      droneFilter.frequency.value = 150;
+      droneFilter.Q.value = 1.2;
+      turbulenceFilter.type = "lowpass";
+      turbulenceFilter.frequency.value = 180;
+      turbulenceFilter.Q.value = 0.65;
+      shearFilter.type = "bandpass";
+      shearFilter.frequency.value = 420;
+      shearFilter.Q.value = 0.8;
+      compressor.threshold.value = -20;
+      compressor.knee.value = 16;
+      compressor.ratio.value = 8;
+      compressor.attack.value = 0.012;
+      compressor.release.value = 0.28;
+
+      drone.connect(droneFilter).connect(master);
+      turbulence.connect(turbulenceFilter).connect(master);
+      shear.connect(shearFilter).connect(master);
+      master.connect(compressor).connect(context.destination);
+
+      [
+        ["sine", 29, 0.7],
+        ["triangle", 43.5, 0.34],
+        ["sawtooth", 58, 0.085],
+        ["sine", 87, 0.12],
+      ].forEach(([type, frequency, level]) => {
+        const oscillator = context.createOscillator();
+        const gain = context.createGain();
+        oscillator.type = type;
+        oscillator.frequency.value = frequency;
+        oscillator.detune.value = (Math.random() - 0.5) * 7;
+        gain.gain.value = level;
+        oscillator.connect(gain).connect(drone);
+        oscillator.start();
+      });
+
+      // Integrated random samples create a heavy, non-hissy turbulent bed.
+      const noiseBuffer = context.createBuffer(
+        1,
+        context.sampleRate * 4,
+        context.sampleRate,
+      );
+      const samples = noiseBuffer.getChannelData(0);
+      let brown = 0;
+      for (let i = 0; i < samples.length; i++) {
+        brown = (brown + Math.random() * 0.16 - 0.08) / 1.015;
+        samples[i] = brown * 2.6;
+      }
+      const noise = context.createBufferSource();
+      const noiseSplit = context.createGain();
+      noise.buffer = noiseBuffer;
+      noise.loop = true;
+      noise.connect(noiseSplit);
+      noiseSplit.connect(turbulence);
+      noiseSplit.connect(shear);
+      noise.start();
+
+      // Slow irregular "pressure" oscillation keeps the roar alive.
+      const pressure = context.createOscillator();
+      const pressureDepth = context.createGain();
+      pressure.type = "sine";
+      pressure.frequency.value = 0.115;
+      pressureDepth.gain.value = 0.08;
+      pressure.connect(pressureDepth).connect(drone.gain);
+      pressure.start();
+
+      return {
+        context,
+        master,
+        droneFilter,
+        turbulence,
+        turbulenceFilter,
+        shear,
+        shearFilter,
+      };
+    };
+    const updateAudio = (immediate = false) => {
+      if (!audio) return;
+      const now = audio.context.currentTime;
+      if (!immediate && fallMode && now - lastAudioUpdate < 0.06) return;
+      lastAudioUpdate = now;
+      const diskApproach = Math.max(
+        0,
+        Math.min(
+          1,
+          (MAX_DISTANCE - view.distance) / (MAX_DISTANCE - DISK_INNER_EDGE),
+        ),
+      );
+      const smoothApproach =
+        diskApproach * diskApproach * (3 - 2 * diskApproach);
+      const rise = (Math.exp(smoothApproach * 4.6) - 1) / (Math.exp(4.6) - 1);
+      const horizonDistance = Math.max(
+        0,
+        Math.min(
+          1,
+          (view.distance - MIN_DISTANCE) / (DISK_INNER_EDGE - MIN_DISTANCE),
+        ),
+      );
+      // The inner disk is the acoustic peak. Inside it, a smooth turning point
+      // rolls the roar down to a muffled residual hum at the horizon.
+      const horizonFade =
+        horizonDistance * horizonDistance * (3 - 2 * horizonDistance);
+      const intensity = rise * horizonFade;
+      const ambientFloor = 0.007 + 0.021 * horizonFade;
+      const ramp = immediate ? 0.01 : 0.12;
+      const target = (parameter, value) =>
+        parameter.setTargetAtTime(value, now, ramp);
+      const interiorSilence = Math.exp(-interiorDepth * 1.15);
+
+      target(
+        audio.master.gain,
+        soundEnabled ? (ambientFloor + intensity * 0.54) * interiorSilence : 0,
+      );
+      target(audio.droneFilter.frequency, 145 + intensity * 1050);
+      target(audio.turbulence.gain, 0.13 + intensity * 0.62);
+      target(audio.turbulenceFilter.frequency, 170 + intensity * 1350);
+      target(audio.shear.gain, 0.015 + intensity * 0.7);
+      target(audio.shearFilter.frequency, 380 + intensity * 1750);
+    };
+    const awakenAudio = () => {
+      if (!soundEnabled) return;
+      if (!audio) audio = makeBlackHoleAudio();
+      if (!audio) return;
+      if (audio.context.state === "suspended") {
+        audio.context
+          .resume()
+          .then(() => updateAudio(true))
+          .catch(() => {});
+      } else {
+        updateAudio();
+      }
+    };
+
     const accTexture = gl.createTexture(),
       accBuffer = gl.createFramebuffer();
     const maxSize = gl.getParameter(gl.MAX_TEXTURE_SIZE);
-    let gesture,
-      frame,
-      timer,
-      scale;
+    let gesture, frame, timer, scale;
     const finalScale = () =>
       Math.max(
         0.75,
@@ -472,8 +742,49 @@
       const dt = Math.min((now - previousTime) * 0.001, 0.05);
       previousTime = now;
       const ease = Math.min(1, dt * 5);
+      if (fallMode) {
+        if (view.distance > MIN_DISTANCE) {
+          const proximity = Math.max(
+            0,
+            Math.min(
+              1,
+              (defaults.distance - view.distance) /
+                (defaults.distance - MIN_DISTANCE),
+            ),
+          );
+          // Accumulate radial velocity so the image accelerates through the
+          // final approach rather than asymptotically freezing at the horizon.
+          fallSpeed = Math.min(
+            0.4,
+            fallSpeed + dt * (0.006 + 0.12 * proximity * proximity),
+          );
+          zoomBy(Math.exp(-dt * fallSpeed));
+        }
+        if (view.distance <= INTERIOR_HANDOFF) {
+          // Ease one continuous interior depth into the exterior trajectory.
+          // There is no second veil curve to create a visible compositing seam.
+          const handoff = Math.max(
+            0,
+            Math.min(
+              1,
+              (INTERIOR_HANDOFF - view.distance) /
+                (INTERIOR_HANDOFF - INTERIOR_HANDOFF_END),
+            ),
+          );
+          const handoffEase = handoff * handoff * (3 - 2 * handoff);
+          interiorSpeed = Math.min(
+            0.65,
+            Math.max(interiorSpeed, fallSpeed) + dt * 0.015,
+          );
+          interiorDepth += dt * interiorSpeed * handoffEase;
+        }
+        updateAudio();
+        updateChrome();
+      }
       view.yaw += (view.targetYaw - view.yaw) * ease;
       view.pitch += (view.targetPitch - view.pitch) * ease;
+      view.lookYaw += (view.targetLookYaw - view.lookYaw) * ease;
+      view.lookPitch += (view.targetLookPitch - view.lookPitch) * ease;
       resize();
       gl.bindFramebuffer(gl.FRAMEBUFFER, accBuffer);
       gl.disable(gl.BLEND);
@@ -484,7 +795,10 @@
       gl.uniform2f(u.pan, view.panX, view.panY);
       gl.uniform2f(u.jitter, 0, 0);
       gl.uniform3f(u.camera, view.yaw, view.pitch, view.distance);
+      gl.uniform2f(u.look, view.lookYaw, view.lookPitch);
       gl.uniform1f(u.time, now * 0.001);
+      gl.uniform1f(u.falling, fallMode ? 1 : 0);
+      gl.uniform1f(u.interior, fallMode ? interiorDepth : 0);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
 
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -500,6 +814,8 @@
       if (!frame) frame = requestAnimationFrame(draw);
     };
     const moving = () => {
+      updateAudio();
+      updateChrome();
       quality(false);
       clearTimeout(timer);
       timer = setTimeout(() => quality(true), 120);
@@ -513,8 +829,62 @@
         distance: Math.hypot(a.x - b.x, a.y - b.y),
       };
     };
+    const zoomBy = (factor) => {
+      // Scale altitude above the horizon rather than the absolute radius. This
+      // gives the final approach enough precision while never crossing r = 0.5.
+      const altitude = (view.distance - EVENT_HORIZON) * factor;
+      view.distance =
+        EVENT_HORIZON +
+        Math.max(
+          MIN_DISTANCE - EVENT_HORIZON,
+          Math.min(MAX_DISTANCE - EVENT_HORIZON, altitude),
+        );
+    };
+    const updateChrome = () => {
+      const horizonDistance = Math.max(
+        0,
+        Math.min(
+          1,
+          (view.distance - MIN_DISTANCE) / (DISK_INNER_EDGE - MIN_DISTANCE),
+        ),
+      );
+      const opacity =
+        horizonDistance * horizonDistance * (3 - 2 * horizonDistance);
+      document.body.style.setProperty("--ui-opacity", opacity.toFixed(3));
+      document.body.classList.toggle("ui-hidden", opacity < 0.035);
+    };
+    const setFallMode = (enabled) => {
+      fallMode = enabled;
+      if (fallMode && view.distance <= MIN_DISTANCE + 0.002)
+        view.distance = defaults.distance;
+      if (fallMode) {
+        fallSpeed = 0.04;
+        interiorDepth = 0;
+        interiorSpeed = 0.4;
+        view.panX = 0;
+        view.panY = 0;
+        awakenAudio();
+      } else {
+        fallSpeed = 0.04;
+        interiorDepth = 0;
+        interiorSpeed = 0.4;
+        view.lookYaw = 0;
+        view.targetLookYaw = 0;
+        view.lookPitch = 0;
+        view.targetLookPitch = 0;
+      }
+      document.body.classList.toggle("falling", fallMode);
+      fall.textContent = fallMode ? "Exit fall" : "Fall mode";
+      fall.setAttribute("aria-pressed", String(fallMode));
+      help.innerHTML = fallMode
+        ? "Drag: look around · Turn fully to look behind<br>F or Esc: exit fall"
+        : "Drag: orbit · Shift drag: move<br>Wheel or pinch: zoom";
+      updateChrome();
+      quality(true);
+    };
 
     canvas.addEventListener("pointerdown", (e) => {
+      awakenAudio();
       canvas.setPointerCapture(e.pointerId);
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       gesture = readGesture();
@@ -525,14 +895,17 @@
       const point = { x: e.clientX, y: e.clientY };
       pointers.set(e.pointerId, point);
       const next = readGesture();
-      if (next && gesture) {
-        view.distance = Math.max(
-          3,
-          Math.min(
-            12,
-            (view.distance * gesture.distance) / Math.max(next.distance, 1),
-          ),
+      if (fallMode) {
+        // The trajectory owns position in fall mode; dragging only turns the
+        // astronaut's head. Yaw is deliberately unbounded for looking behind.
+        view.targetLookYaw -= (point.x - old.x) * 0.006;
+        view.targetLookPitch = Math.max(
+          -1.5,
+          Math.min(1.5, view.targetLookPitch + (point.y - old.y) * 0.0045),
         );
+        gesture = next;
+      } else if (next && gesture) {
+        zoomBy(gesture.distance / Math.max(next.distance, 1));
         view.panX += ((next.x - gesture.x) * 2) / innerHeight;
         view.panY -= ((next.y - gesture.y) * 2) / innerHeight;
         gesture = next;
@@ -565,19 +938,35 @@
       "wheel",
       (e) => {
         e.preventDefault();
-        view.distance = Math.max(
-          3,
-          Math.min(12, view.distance * Math.exp(e.deltaY * 0.001)),
-        );
+        if (fallMode) return;
+        awakenAudio();
+        zoomBy(Math.exp(e.deltaY * 0.0022));
         moving();
       },
       { passive: false },
     );
     reset.addEventListener("click", () => {
+      awakenAudio();
+      setFallMode(false);
       Object.assign(view, defaults);
+      updateAudio(true);
+      updateChrome();
       quality(true);
     });
+    fall.addEventListener("click", () => setFallMode(!fallMode));
+    sound.addEventListener("click", () => {
+      soundEnabled = !soundEnabled;
+      sound.textContent = `Sound: ${soundEnabled ? "on" : "off"}`;
+      sound.setAttribute("aria-pressed", String(soundEnabled));
+      if (soundEnabled) awakenAudio();
+      updateAudio(true);
+    });
+    addEventListener("keydown", (e) => {
+      if (e.repeat) return;
+      if (e.key === "Escape" && fallMode) setFallMode(false);
+    });
     addEventListener("resize", () => quality(true), { passive: true });
+    updateChrome();
     quality(true);
   })().catch((error) => {
     console.error(error);
