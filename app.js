@@ -823,6 +823,10 @@
       interiorSpeed = 0.4,
       lastAudioUpdate = -Infinity,
       soundEnabled = false;
+    const useMobileAudioMix =
+      Boolean(navigator.userAgentData?.mobile) ||
+      /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) ||
+      matchMedia("(pointer: coarse) and (max-width: 900px)").matches;
     const makeBlackHoleAudio = () => {
       const AudioContext = window.AudioContext || window.webkitAudioContext;
       if (!AudioContext) {
@@ -839,7 +843,11 @@
       const shear = context.createGain();
       const shearFilter = context.createBiquadFilter();
       const compressor = context.createDynamicsCompressor();
-      const octaveDown = 0.5;
+      // Phone speakers discard most of the desktop mix's sub-bass. Shift the
+      // whole spectrum upward on mobile and give it enough level to remain
+      // audible through a small built-in speaker.
+      const octaveDown = useMobileAudioMix ? 2 : 0.5;
+      const outputBoost = useMobileAudioMix ? 2.2 : 1;
 
       master.gain.value = 0;
       drone.gain.value = 0.7;
@@ -920,6 +928,7 @@
         shear,
         shearFilter,
         octaveDown,
+        outputBoost,
       };
     };
     const updateAudio = (immediate = false) => {
@@ -958,7 +967,11 @@
 
       target(
         audio.master.gain,
-        soundEnabled ? (ambientFloor + intensity * 0.54) * interiorSilence : 0,
+        soundEnabled
+          ? (ambientFloor + intensity * 0.54) *
+              interiorSilence *
+              audio.outputBoost
+          : 0,
       );
       target(
         audio.droneFilter.frequency,
