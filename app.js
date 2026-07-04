@@ -124,6 +124,19 @@
       for(int i=0;i<4;i++){n+=a*noise(p);p=m*p+7.13;a*=.48;}
       return n;
     }
+    float hash31(vec3 p){
+      p=fract(p*vec3(443.897,441.423,437.195));
+      p+=dot(p,p.yzx+19.19);
+      return fract((p.x+p.y)*p.z);
+    }
+    float noise3(vec3 p){
+      vec3 i=floor(p),f=fract(p);
+      f=f*f*(3.-2.*f);
+      return mix(mix(mix(hash31(i),hash31(i+vec3(1,0,0)),f.x),
+                     mix(hash31(i+vec3(0,1,0)),hash31(i+vec3(1,1,0)),f.x),f.y),
+                 mix(mix(hash31(i+vec3(0,0,1)),hash31(i+vec3(1,0,1)),f.x),
+                     mix(hash31(i+vec3(0,1,1)),hash31(i+vec3(1,1,1)),f.x),f.y),f.z);
+    }
     vec3 plasma(float u,float opacity,float height,float orbitalPhase){
       float r=EH/max(u,1e-5);
       float q=clamp((r-RI)/(RO-RI),0.,1.);
@@ -198,12 +211,45 @@
       light+=vec3(1.,.25,.045)*.11*(halo0+halo1);
       return light;
     }
-    vec3 stars(vec2 p){
-      vec2 cell=floor(p*resolution/3.);
-      float h=hash21(cell);
-      float star=smoothstep(.9978,1.,h);
-      float twinkle=.45+.55*hash21(cell+19.7);
-      return vec3(.42,.54,.68)*star*twinkle*.42;
+    vec3 spaceColor(vec3 d){
+      d=normalize(d);
+      vec3 cell=floor(d*620.);
+      float h=hash31(cell);
+      float star=smoothstep(.9965,1.,h);
+      float twinkle=.97+.03*sin(time*(.45+h)+h*53.);
+      vec3 tint=mix(vec3(.48,.62,1.),vec3(1.,.74,.46),hash31(cell+7.));
+      float milky=pow(max(0.,1.-abs(d.y*.72+d.x*.18)),8.);
+      float dust=noise3(d*7.)*noise3(d*19.+3.);
+      vec3 sky=vec3(.0015,.002,.004);
+      sky+=tint*star*(1.7+4.*pow(h,16.))*twinkle;
+      sky+=vec3(.018,.022,.032)*milky*dust;
+      return sky;
+    }
+    vec3 raytracedSpace(vec3 local){
+      // This is the numerical light-path integration from the reference
+      // renderer, expressed in the same Schwarzschild units as the lookup
+      // geometry. There is no screen-space lens mask or circular blend.
+      const float HORIZON=EH;
+      vec3 pos=radial*(EH/max(observerU,1e-6));
+      vec3 dir=normalize(local);
+      for(int i=0;i<176;i++){
+        float r=length(pos);
+        if(r<HORIZON*1.01)return vec3(0);
+        if(r>46.&&dot(pos,dir)>0.)return spaceColor(dir);
+
+        float radialSpeed=dot(pos,dir);
+        float h2=max(dot(pos,pos)-radialSpeed*radialSpeed,0.);
+        float ds=clamp((r-HORIZON)*.1,.035,.68);
+        if(r>15.)ds=min(ds,1.);
+
+        float invR=1./max(r,HORIZON*1.01);
+        float invR2=invR*invR;
+        vec3 accel=-1.5*HORIZON*h2*pos*(invR2*invR2*invR);
+        dir=normalize(dir+accel*ds);
+        pos+=dir*ds;
+      }
+      // Rays still orbiting after the full budget belong to the shadow.
+      return vec3(0);
     }
     void main(){
       vec3 v=normalize(ray);
@@ -212,12 +258,12 @@
                               gl_FragCoord.x-center.x);
       // A smooth Gaussian density profile sampled through the disk atmosphere.
       // Every layer uses the original geodesic solver; only optical depth varies.
-      vec3 hdr=trace(v,0.,orbitalPhase)*.34;
+      vec3 hdr=raytracedSpace(v);
+      hdr+=trace(v,0.,orbitalPhase)*.34;
       hdr+=trace(normalize(ray+vec3(0,.0042,0)), .42,orbitalPhase)*.245;
       hdr+=trace(normalize(ray-vec3(0,.0042,0)),-.42,orbitalPhase)*.245;
       hdr+=trace(normalize(ray+vec3(0,.0084,0)), .84,orbitalPhase)*.13;
       hdr+=trace(normalize(ray-vec3(0,.0084,0)),-.84,orbitalPhase)*.13;
-      hdr+=stars(gl_FragCoord.xy);
       vec3 mapped=1.-exp(-hdr*.72);
       mapped=pow(mapped,vec3(.82));
       float grain=hash21(gl_FragCoord.xy)-.5;
@@ -241,7 +287,17 @@
     uniform vec2 resolution;
     out vec4 color;
     vec3 fire(vec2 at){
-      return max(texture(scene,at).rgb-vec3(.055),0.);
+      vec2 px=1./resolution;
+      vec3 c=texture(scene,at).rgb;
+      float nearby=max(
+        max(max(texture(scene,at+vec2(1,0)*px).r,
+                texture(scene,at-vec2(1,0)*px).r),
+            texture(scene,at+vec2(0,1)*px).r),
+        texture(scene,at-vec2(0,1)*px).r);
+      // Extended plasma blooms. Isolated point stars retain compact halos
+      // instead of exposing the sparse bloom kernel as a cross.
+      float bloomSupport=smoothstep(.018,.11,nearby);
+      return max(c-vec3(.055),0.)*bloomSupport;
     }
     void main(){
       vec2 px=1./resolution;
@@ -258,7 +314,17 @@
             +texture(scene,uv+vec2( 5.,-5.)*px).rgb
             +texture(scene,uv+vec2(-5.,-5.)*px).rgb)*.075;
       float luminous=smoothstep(.018,.34,max(meld.r,max(meld.g,meld.b)));
-      base=mix(base,meld,luminous*.68);
+      float localEnergy=(
+        max(texture(scene,uv+vec2(1,0)*px).r,
+            texture(scene,uv+vec2(1,0)*px).g)
+       +max(texture(scene,uv-vec2(1,0)*px).r,
+            texture(scene,uv-vec2(1,0)*px).g)
+       +max(texture(scene,uv+vec2(0,1)*px).r,
+            texture(scene,uv+vec2(0,1)*px).g)
+       +max(texture(scene,uv-vec2(0,1)*px).r,
+            texture(scene,uv-vec2(0,1)*px).g))*.25;
+      float extendedSource=smoothstep(.10,.30,localEnergy);
+      base=mix(base,meld,luminous*extendedSource*.68);
       vec3 near=fire(uv)*.20;
       near+=(fire(uv+vec2( 4.,0.)*px)+fire(uv+vec2(-4.,0.)*px)
             +fire(uv+vec2(0., 4.)*px)+fire(uv+vec2(0.,-4.)*px))*.105;
@@ -336,7 +402,15 @@
     gl.uniform1i(gl.getUniformLocation(postProgram, "scene"), 2);
     const postResolution = gl.getUniformLocation(postProgram, "resolution");
 
-    const defaults = { yaw: 0, pitch: 0.2, distance: 7.2, panX: 0, panY: 0 };
+    const defaults = {
+      yaw: 0,
+      targetYaw: 0,
+      pitch: 0.2,
+      targetPitch: 0.2,
+      distance: 7.2,
+      panX: 0,
+      panY: 0,
+    };
     const view = { ...defaults },
       pointers = new Map();
     const accTexture = gl.createTexture(),
@@ -393,7 +467,13 @@
       if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE)
         throw Error("Could not create the accumulation buffer.");
     };
+    let previousTime = performance.now();
     const draw = (now) => {
+      const dt = Math.min((now - previousTime) * 0.001, 0.05);
+      previousTime = now;
+      const ease = Math.min(1, dt * 5);
+      view.yaw += (view.targetYaw - view.yaw) * ease;
+      view.pitch += (view.targetPitch - view.pitch) * ease;
       resize();
       gl.bindFramebuffer(gl.FRAMEBUFFER, accBuffer);
       gl.disable(gl.BLEND);
@@ -463,8 +543,11 @@
           view.panX += (dx * 2) / innerHeight;
           view.panY -= (dy * 2) / innerHeight;
         } else {
-          view.yaw -= dx * 0.008;
-          view.pitch = Math.max(-1.42, Math.min(1.42, view.pitch + dy * 0.006));
+          view.targetYaw -= dx * 0.0045;
+          view.targetPitch = Math.max(
+            -1.42,
+            Math.min(1.42, view.targetPitch + dy * 0.0035),
+          );
         }
       }
       moving();
