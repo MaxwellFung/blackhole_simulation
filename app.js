@@ -939,8 +939,6 @@
       pointers.set(e.pointerId, point);
       const next = readGesture();
       if (fallMode) {
-        // The trajectory owns position in fall mode; dragging only turns the
-        // astronaut's head. Yaw is deliberately unbounded for looking behind.
         view.targetLookYaw -= (point.x - old.x) * 0.006;
         view.targetLookPitch = Math.max(
           -1.5,
