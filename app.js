@@ -142,12 +142,12 @@
     float rimMask(float u,float orbitalPhase){
       float r=EH/max(u,1e-5);
       float q=clamp((r-RI)/(RO-RI),0.,1.);
-      float textureTime=min(time,1.45);
-      float drift=orbitalPhase-time*(.95/pow(r,1.5));
+      vec2 stir=vec2(cos(time*.41),sin(time*.37));
+      float drift=orbitalPhase-time*(.42+.28/pow(r,.65));
       vec2 orbit=vec2(cos(drift),sin(drift));
       float edge=smoothstep(.70,1.,q);
-      float broad=fbm(orbit*2.6+vec2(textureTime*.025,r*.85));
-      float fine=fbm(orbit*10.5+vec2(-textureTime*.11,r*3.9+broad*2.4));
+      float broad=fbm(orbit*2.6+stir*.32+vec2(0.,r*.85));
+      float fine=fbm(orbit*10.5-stir.yx*.42+vec2(0.,r*3.9+broad*2.4));
       float scallop=.5+.5*sin(drift*12.+broad*7.+r*2.2);
       float ragged=smoothstep(.30,.76,.50*broad+.32*fine+.18*scallop);
       float reach=mix(.72,.985,ragged);
@@ -171,33 +171,42 @@
     vec3 plasma(float u,float opacity,float height,float orbitalPhase){
       float r=EH/max(u,1e-5);
       float q=clamp((r-RI)/(RO-RI),0.,1.);
-      float textureTime=min(time,1.45);
-      // Keplerian shear: the inner gas completes an orbit much faster.
-      float spin=time*(2.3/pow(r,1.5));
+      vec2 stir=vec2(cos(time*.43),sin(time*.31));
+      vec2 stirFine=vec2(cos(time*.79+1.7),sin(time*.53+2.3));
+      // The plasma orbits forward, but the visible turbulence uses limited
+      // differential shear so eddies are replenished instead of winding into
+      // uniform circular bands.
+      float spin=time*(.62+.42/pow(r,.65));
       // Screen-space phase avoids the parity reversal of secondary lens images.
       // Subtracting spin makes every visible feature advance counterclockwise.
       float angle=orbitalPhase-spin;
       vec2 orbit=vec2(cos(angle),sin(angle));
       vec2 flow=orbit*5.2+
-                vec2(r*7.5+height*9.,r*20.-textureTime*.17);
+                vec2(r*7.5+height*9.,r*20.)+stir*.62;
       float coarse=fbm(flow);
-      float fine=fbm(orbit*18.+
+      float fine=fbm(orbit*18.+stirFine*.72+
                      vec2(-r*9.+height*21.,
-                          r*72.+coarse*4.-textureTime*.65));
+                          r*72.+coarse*4.));
       float filaments=smoothstep(.28,.92,.52*coarse+.72*fine);
-      float knots=fbm(orbit*2.1+vec2(-textureTime*.08,r*5.7));
-      float rings=.68+.32*sin(r*82.+coarse*8.-textureTime*.8);
+      float knots=fbm(orbit*2.1-stir*.30+vec2(0.,r*5.7));
+      float rings=.68+.32*sin(r*82.+coarse*8.-time*.42);
       float rim=rimMask(u,orbitalPhase);
       float outerGas=smoothstep(.36,.96,q);
       float outerFade=smoothstep(.18,.86,q);
       float outerTint=smoothstep(.54,1.0,q);
       float rimGas=smoothstep(.78,.97,q);
-      float gapField=.52*fbm(orbit*3.4+vec2(textureTime*.05,r*2.3))+
-                     .48*fbm(orbit*13.5+vec2(-textureTime*.16,r*6.8));
+      float gapField=.52*fbm(orbit*3.4+stir*.38+vec2(0.,r*2.3))+
+                     .48*fbm(orbit*13.5-stirFine*.46+vec2(0.,r*6.8));
       float intermittent=mix(1.,smoothstep(.38,.78,gapField),rimGas);
       float wispiness=mix(1.,mix(.36,1.08,smoothstep(.18,.88,fine)),outerFade);
+      float eddyA=fbm(orbit*8.4+stirFine*1.18+
+                      vec2(r*3.2,height*4.5));
+      float eddyB=fbm(orbit*23.0-stir.yx*1.55+
+                      vec2(-r*8.5,height*15.0));
+      float churn=smoothstep(.26,.80,.54*eddyA+.46*eddyB);
       float density=mix(.34,1.08,filaments)*mix(.86,1.15,rings);
       density*=mix(.72,1.32,smoothstep(.22,.86,knots));
+      density*=mix(.62,1.42,churn);
       density*=exp(-height*height*2.2);
       density*=mix(1.,.28,outerFade)*intermittent*wispiness*rim;
       float heat=pow(1.-q,.42);
@@ -352,28 +361,12 @@
     }
     void main(){
       vec3 observed=normalize(ray);
-      vec3 v=observed;
-      if(interior>0.){
-        // Compress the entire exterior image continuously toward the outward
-        // direction. Sampling a wider source angle for each observed angle
-        // creates optical flow rather than a stationary image behind a mask.
-        float mu=clamp(dot(observed,radial),-1.,1.);
-        float observedAngle=acos(mu);
-        vec3 transverse=observed-mu*radial;
-        float transverseLength=length(transverse);
-        if(transverseLength>1e-6){
-          float angularScale=max(exp(-interior*.22),.025);
-          float sourceAngle=min(observedAngle/angularScale,PI);
-          v=cos(sourceAngle)*radial+
-            sin(sourceAngle)*(transverse/transverseLength);
-        }
-      }
       vec2 center=resolution*.5+pan*resolution.y*.5;
       float orbitalPhase=atan(gl_FragCoord.y-center.y,
                               gl_FragCoord.x-center.x);
       // A smooth Gaussian density profile sampled through the disk atmosphere.
       // Every layer uses the original geodesic solver; only optical depth varies.
-      vec3 sky=raytracedSpace(v);
+      vec3 sky=raytracedSpace(observed);
       float exteriorWindow=1.,exteriorAttenuation=1.;
       if(interior>0.){
         // All photons emitted outside the horizon share one outward causal
@@ -786,7 +779,8 @@
       if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE)
         throw Error("Could not create the accumulation buffer.");
     };
-    let previousTime = performance.now();
+    const startTime = performance.now();
+    let previousTime = startTime;
     const draw = (now) => {
       const dt = Math.min((now - previousTime) * 0.001, 0.05);
       previousTime = now;
@@ -845,7 +839,7 @@
       gl.uniform2f(u.jitter, 0, 0);
       gl.uniform3f(u.camera, view.yaw, view.pitch, view.distance);
       gl.uniform2f(u.look, view.lookYaw, view.lookPitch);
-      gl.uniform1f(u.time, now * 0.001);
+      gl.uniform1f(u.time, (now - startTime) * 0.001);
       gl.uniform1f(u.falling, fallMode ? 1 : 0);
       gl.uniform1f(u.interior, fallMode ? interiorDepth : 0);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
