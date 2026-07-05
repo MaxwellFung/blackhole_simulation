@@ -1,11 +1,13 @@
 (() => {
   "use strict";
 
-  const canvas = document.querySelector("#space");
-  const reset = document.querySelector("#reset");
-  const sound = document.querySelector("#sound");
-  const fall = document.querySelector("#fall");
-  const help = document.querySelector(".help");
+  const [canvas, reset, sound, fall, help] = [
+    "#space",
+    "#reset",
+    "#sound",
+    "#fall",
+    ".help",
+  ].map((selector) => document.querySelector(selector));
   const gl = canvas.getContext("webgl2", {
     alpha: false,
     antialias: false,
@@ -31,6 +33,9 @@
     MAX_DISTANCE = 48;
   const DC = D[0] * D[1],
     RC = R[0] * R[1];
+  const clamp = (value, min = 0, max = 1) =>
+      Math.max(min, Math.min(max, value)),
+    smooth = (value) => value * value * (3 - 2 * value);
   const linear = Boolean(gl.getExtension("OES_texture_float_linear"));
   const sampling = linear
     ? `
@@ -89,11 +94,11 @@
     flat in vec3 radial;
     flat in float observerU,lapse;
     in vec3 ray;
-    uniform sampler2D deflectionTable,radiusTable;
+    uniform sampler2D deflectionTable,radiusTable,noiseTexture;
     uniform vec2 resolution,pan;
     uniform float time,falling,interior;
     out vec4 color;
-    const float PI=3.141592653589793,MU=4./27.,EH=.5,RI=1.5,RO=2.8;
+    const float PI=3.141592653589793,MU=4./27.,EH=.5,RI=1.5,RO=7.4;
     const float UO=EH/RO,CULL=.8*UO*UO*(1.-UO),GUARD=.85*UO*UO*(1.-UO);
     const ivec2 DS=ivec2(512),RS=ivec2(256,128);
     ${sampling}
@@ -127,18 +132,6 @@
       p+=dot(p,p+45.32);
       return fract(p.x*p.y);
     }
-    float noise(vec2 p){
-      vec2 i=floor(p),f=fract(p);
-      f=f*f*(3.-2.*f);
-      return mix(mix(hash21(i),hash21(i+vec2(1,0)),f.x),
-                 mix(hash21(i+vec2(0,1)),hash21(i+1.),f.x),f.y);
-    }
-    float fbm(vec2 p){
-      float n=0.,a=.55;
-      mat2 m=mat2(1.62,1.18,-1.18,1.62);
-      for(int i=0;i<4;i++){n+=a*noise(p);p=m*p+7.13;a*=.48;}
-      return n;
-    }
     float hash31(vec3 p){
       p=fract(p*vec3(443.897,441.423,437.195));
       p+=dot(p,p.yzx+19.19);
@@ -155,49 +148,76 @@
     vec3 plasma(float u,float opacity,float height,float orbitalPhase){
       float r=EH/max(u,1e-5);
       float q=clamp((r-RI)/(RO-RI),0.,1.);
-      // Keplerian shear: the inner gas completes an orbit much faster.
-      float spin=time*(2.3/pow(r,1.5));
-      // Screen-space phase avoids the parity reversal of secondary lens images.
-      // Subtracting spin makes every visible feature advance counterclockwise.
-      float angle=orbitalPhase-spin;
-      vec2 orbit=vec2(cos(angle),sin(angle));
-      vec2 flow=orbit*5.2+
-                vec2(r*7.5+height*9.,r*20.-time*.17);
-      float coarse=fbm(flow);
-      float fine=fbm(orbit*18.+
-                     vec2(-r*9.+height*21.,
-                          r*72.+coarse*4.-time*.65));
-      float filaments=smoothstep(.28,.92,.52*coarse+.72*fine);
-      float knots=fbm(orbit*2.1+vec2(-time*.08,r*5.7));
-      float rings=.68+.32*sin(r*82.+coarse*8.-time*.8);
-      float outerGas=smoothstep(.36,.96,q);
-      float outerFade=smoothstep(.44,1.0,q);
-      float outerTint=smoothstep(.54,1.0,q);
-      float rimGas=smoothstep(.78,.97,q);
-      float gapField=.52*fbm(orbit*3.4+vec2(time*.05,r*2.3))+
-                     .48*fbm(orbit*13.5+vec2(-time*.16,r*6.8));
-      float intermittent=mix(1.,smoothstep(.38,.78,gapField),rimGas);
-      float wispiness=mix(1.,mix(.36,1.08,smoothstep(.18,.88,fine)),outerFade);
-      float density=mix(.34,1.08,filaments)*mix(.86,1.15,rings);
-      density*=mix(.72,1.32,smoothstep(.22,.86,knots));
-      density*=exp(-height*height*2.2);
-      density*=mix(1.,.50,outerFade)*intermittent*wispiness;
-      float heat=pow(1.-q,.42);
-      float hot=pow(heat,2.2)*mix(.52,1.48,fine)*mix(.8,1.25,knots);
-      vec3 copper=vec3(1.0,.19,.025);
-      vec3 amber=vec3(1.0,.54,.16);
-      vec3 white=vec3(1.0,.93,.72);
-      vec3 tint=mix(copper,amber,smoothstep(0.,.78,heat));
-      tint=mix(tint,white,smoothstep(.48,1.08,hot));
-      tint=mix(tint,vec3(.78,.36,.13),outerTint*.62);
-      float beaming=.78+.32*sin(orbitalPhase+1.1);
-      float gasGlow=mix(1.15+5.8*hot,.46+2.35*hot,outerFade);
-      return tint*opacity*density*gasGlow*beaming;
+      float spin=time*(1.72/pow(r,1.5));
+      vec2 flow=vec2(
+        orbitalPhase/(2.*PI)-spin/(2.*PI),
+        q
+      );
+
+      vec4 broadField=textureLod(
+        noiseTexture,
+        flow+vec2(height*.009,-height*.018),
+        0.
+      );
+      vec2 warp=broadField.rg-.5;
+      vec4 detailField=textureLod(
+        noiseTexture,
+        flow*vec2(3.,2.35)+warp*vec2(.19,.15)+
+          vec2(time*.003+height*.010,height*.021),
+        0.
+      );
+      float broad=broadField.b;
+      float rockField=broad*.55+detailField.g*.28+detailField.a*.17;
+      float molten=smoothstep(.32,.76,rockField);
+      float crust=smoothstep(.55,.84,
+        broadField.r*.58+detailField.r*.42);
+      float sand=detailField.a*.55+detailField.b*.45;
+      float outerMix=smoothstep(.46,.88,q);
+      float whiteCore=1.-smoothstep(.08,.25,q);
+
+      float clumps=exp2(clamp(2.65*(rockField-.5),-1.7,1.45));
+      float density=clumps*mix(.42,1.34,molten);
+      density*=mix(1.,.46,crust*(1.-molten*.58));
+      float midplane=exp(-pow(abs(height),3.2));
+      float atmosphere=exp(-abs(height)*.66);
+      float vertical=.60*midplane+.40*atmosphere;
+      float sandyDensity=mix(.30,1.12,sand)*
+                         exp2(1.15*(broad-.5));
+      density=mix(density,sandyDensity,outerMix);
+      density*=vertical;
+      density=mix(density,1.42*vertical,whiteCore*.92);
+      density*=2.;
+
+      float innerEdge=smoothstep(RI,RI+.10,r);
+      float outerEdge=pow(
+        max(1.-smoothstep(RO-2.10,RO,r),0.),
+        1.85
+      );
+      float edge=innerEdge*outerEdge;
+      float heat=pow(max(1.-q,0.),1.8);
+      float hot=heat*heat*mix(.24,1.26,molten)*
+                mix(.72,1.12,broad);
+
+      vec3 ember=vec3(.48,.045,.006);
+      vec3 copper=vec3(1.0,.24,.035);
+      vec3 cream=vec3(1.0,.82,.54);
+      vec3 white=vec3(1.0,.985,.91);
+      vec3 tint=mix(ember,copper,smoothstep(.02,.46,heat));
+      tint=mix(tint,cream,smoothstep(.38,.96,hot));
+      tint=mix(tint,white,smoothstep(1.02,1.38,hot));
+      vec3 sandDark=vec3(.20,.045,.012);
+      vec3 sandLight=vec3(.68,.24,.055);
+      vec3 sandTint=mix(sandDark,sandLight,sand);
+      tint=mix(tint,sandTint,outerMix);
+      tint=mix(tint,vec3(1.,.975,.86),whiteCore*.96);
+
+      float beaming=.83+.23*sin(orbitalPhase+1.1);
+      float emission=density*edge*(.045+3.45*hot)*
+                     mix(1.,.28,outerMix);
+      emission=mix(emission,6.2*edge*vertical,whiteCore*.94);
+      return tint*opacity*emission*beaming;
     }
     vec3 fallRay(vec3 local,out float frequencyShift){
-      // Exact local aberration for a radial geodesic dropped from rest at
-      // infinity: its speed relative to a stationary Schwarzschild observer is
-      // beta=sqrt(r_s/r). "local" points toward the observed source.
       vec3 observed=normalize(local);
       float beta=sqrt(clamp(observerU,0.,.999999));
       float mu=dot(observed,radial);
@@ -208,12 +228,8 @@
         staticMu*radial+transverse*lapse/denominator
       );
 
-      // Conserved photon energy gives nu_observer/nu_infinity. Directly behind
-      // the infaller this approaches 1/2 at the event horizon, not zero.
       frequencyShift=(1.-beta*staticMu)/max(lapse*lapse,1e-6);
 
-      // Convert the stationary observer's orthonormal radial component to the
-      // Schwarzschild spatial coordinate used by the geodesic integrator.
       float radialPart=dot(stationary,radial);
       return normalize(
         stationary+radialPart*(lapse-1.)*radial
@@ -233,7 +249,6 @@
                       color.b+.42*color.g);
         color=mix(color,hot,blue);
       }
-      // I_nu/nu^3 is invariant along a vacuum null geodesic.
       return color*clamp(g*g*g,.015,12.);
     }
     vec3 trace(vec3 local,float height,float orbitalPhase){
@@ -257,12 +272,19 @@
       float side=ud>=0.?1.:-1.,pa=aa+PI*.5;
       float p=a+(side>0.?PI-delta:delta)+side*alpha;
       float p0=mod(p,PI),c0=radius(e,p0);
+      float flip0=mod(floor(p/PI),2.);
+      vec3 hitAxis0=flip0<1.?axis:-axis;
+      float hitPhi0=atan(hitAxis0.z,hitAxis0.x);
       bool v0=p0<pa;
       float rs=side*(c0-observerU);
       v0=v0&&(rs>1e-3||(rs>-1e-3&&alpha<delta));
       float u0=v0?c0:-1.;
 
-      float p1=mod(2.*pa-p,PI),c1=radius(e,p1);
+      float reflected=2.*pa-p;
+      float p1=mod(reflected,PI),c1=radius(e,p1);
+      float flip1=mod(floor(reflected/PI),2.);
+      vec3 hitAxis1=flip1<1.?axis:-axis;
+      float hitPhi1=atan(hitAxis1.z,hitAxis1.x);
       bool v1=e<MU&&side>0.&&p1<pa;
       float u1=v1?c1:-1.;
       float w0=min(fwidth(c0),fwidth(u0<0.?u1:u0));
@@ -272,11 +294,9 @@
       if(observerU<UO&&e<GUARD)return vec3(0);
 
       vec3 light=vec3(0);
-      if(o0>0.)light+=plasma(u0,o0,height,orbitalPhase);
-      if(o1>0.)light+=plasma(u1,o1,height,orbitalPhase);
+      if(o0>0.)light+=plasma(u0,o0,height,hitPhi0);
+      if(o1>0.)light+=plasma(u1,o1,height,hitPhi1);
 
-      // A low-energy sheath gives the optically thick surface a soft edge
-      // without changing the solved geodesic silhouette.
       float halo0=v0?pulse(UO*.965,(EH/RI)*1.015,u0,max(w0,.006)):0.;
       float halo1=v1?pulse(UO*.965,(EH/RI)*1.015,u1,max(w1,.006)):0.;
       light+=vec3(1.,.25,.045)*.11*(halo0+halo1);
@@ -298,21 +318,21 @@
       sky+=vec3(.018,.022,.032)*milky*dust;
       return sky;
     }
-    vec3 raytracedSpace(vec3 local){
-      // This is the numerical light-path integration from the reference
-      // renderer, expressed in the same Schwarzschild units as the lookup
-      // geometry. There is no screen-space lens mask or circular blend.
+    vec3 raytracedSpace(vec3 local,out vec3 diskLight){
       const float HORIZON=EH;
+      diskLight=vec3(0);
+      float transmission=1.;
       vec3 pos=radial*(EH/max(observerU,1e-6));
       float frequencyShift=1.;
       vec3 dir;
       if(falling>.5)dir=fallRay(local,frequencyShift);
       else dir=normalize(local);
+      float marchSeed=hash21(gl_FragCoord.xy*.75487766);
       for(int i=0;i<176;i++){
         float r=length(pos);
         if(r<HORIZON*1.001)return vec3(0);
         if(r>46.&&dot(pos,dir)>0.){
-          vec3 sky=spaceColor(dir);
+          vec3 sky=spaceColor(dir)*transmission;
           return falling>.5?shiftedSpectrum(sky,frequencyShift):sky;
         }
 
@@ -320,6 +340,45 @@
         float h2=max(dot(pos,pos)-radialSpeed*radialSpeed,0.);
         float ds=clamp((r-HORIZON)*.1,.035,.68);
         if(r>15.)ds=min(ds,1.);
+        float sampleOffset=fract(
+          marchSeed+float(i)*.61803398875
+        )-.5;
+        vec3 materialPos=pos+dir*ds*sampleOffset;
+        float cylindricalR=length(materialPos.xz);
+
+        if(cylindricalR>=RI&&cylindricalR<=RO){
+          float diskQ=clamp((cylindricalR-RI)/(RO-RI),0.,1.);
+          float scaleHeight=mix(.100,.380,pow(diskQ,.78));
+          float normalizedHeight=materialPos.y/scaleHeight;
+          if(abs(normalizedHeight)<3.40&&transmission>.008){
+            if(abs(normalizedHeight)<.90)ds=min(ds,.050);
+            vec3 sampleColor=plasma(
+              EH/cylindricalR,
+              1.,
+              normalizedHeight,
+              atan(materialPos.z,materialPos.x)
+            );
+            if(falling>.5)
+              sampleColor=shiftedSpectrum(
+                sampleColor,
+                clamp(frequencyShift,.35,1.8)
+              );
+            float verticalDensity=exp(
+              -normalizedHeight*normalizedHeight*.82
+            );
+            float stepDepth=ds/max(scaleHeight,.025);
+            float materialDensity=clamp(
+              .018+dot(sampleColor,vec3(.055,.085,.025)),
+              .012,
+              1.15
+            );
+            float alpha=1.-exp(
+              -stepDepth*verticalDensity*materialDensity*.34
+            );
+            diskLight+=transmission*sampleColor*alpha;
+            transmission*=1.-alpha*.28;
+          }
+        }
 
         float invR=1./max(r,HORIZON*1.01);
         float invR2=invR*invR;
@@ -327,16 +386,134 @@
         dir=normalize(dir+accel*ds);
         pos+=dir*ds;
       }
-      // Rays still orbiting after the full budget belong to the shadow.
       return vec3(0);
+    }
+    const float KERR_MASS=.3728075814;
+    const float KERR_A=.3504391265;
+    const float KERR_HORIZON=.5;
+    float kerrRadialPotential(float r,float xi,float eta){
+      float delta=r*r-2.*KERR_MASS*r+KERR_A*KERR_A;
+      float p=r*r+KERR_A*KERR_A-KERR_A*xi;
+      return p*p-delta*(eta+(xi-KERR_A)*(xi-KERR_A));
+    }
+    float kerrPolarPotential(float theta,float xi,float eta){
+      float s=max(abs(sin(theta)),1e-4),c=cos(theta);
+      return eta+c*c*(KERR_A*KERR_A-xi*xi/(s*s));
+    }
+    vec3 boyerLindquistDirection(float theta,float phi){
+      float s=sin(theta);
+      return vec3(s*cos(phi),cos(theta),s*sin(phi));
+    }
+    vec3 kerrScene(vec3 local){
+      float frequencyShift=1.;
+      vec3 launch=local;
+      if(falling>.5)launch=fallRay(local,frequencyShift);
+      launch=normalize(launch);
+
+      float r=EH/max(observerU,1e-6);
+      float theta=acos(clamp(radial.y,-1.,1.));
+      float phi=atan(radial.z,radial.x);
+      float st=sin(theta),ct=cos(theta),sp=sin(phi),cp=cos(phi);
+      vec3 er=vec3(st*cp,ct,st*sp);
+      vec3 et=vec3(ct*cp,-st,ct*sp);
+      vec3 ep=vec3(-sp,0.,cp);
+      float nr=dot(launch,er);
+      float nt=dot(launch,et);
+      float np=dot(launch,ep);
+
+      float sigma=r*r+KERR_A*KERR_A*ct*ct;
+      float delta=r*r-2.*KERR_MASS*r+KERR_A*KERR_A;
+      float bigA=(r*r+KERR_A*KERR_A)*(r*r+KERR_A*KERR_A)
+                -KERR_A*KERR_A*delta*st*st;
+      float alpha=sqrt(max(sigma*delta/bigA,1e-8));
+      float omega=2.*KERR_MASS*KERR_A*r/bigA;
+      float gpp=bigA*st*st/sigma;
+      float angularMomentum=sqrt(max(gpp,1e-8))*np;
+      float energy=max(alpha+omega*angularMomentum,1e-5);
+      float xi=angularMomentum/energy;
+      float pTheta=sqrt(sigma)*nt;
+      float eta=(pTheta*pTheta)/(energy*energy)+
+                ct*ct*(xi*xi/max(st*st,1e-8)-KERR_A*KERR_A);
+      float radialSign=nr>=0.?1.:-1.;
+      float polarSign=nt>=0.?1.:-1.;
+      float escapeRadius=max(52.,r+4.);
+
+      for(int i=0;i<224;i++){
+        if(r<=KERR_HORIZON*1.001)return vec3(0);
+        if(r>=escapeRadius&&radialSign>0.){
+          vec3 sky=spaceColor(boyerLindquistDirection(theta,phi));
+          return falling>.5
+            ?shiftedSpectrum(sky,frequencyShift):sky;
+        }
+
+        float radialPotential=max(kerrRadialPotential(r,xi,eta),0.);
+        float polarPotential=max(kerrPolarPotential(theta,xi,eta),0.);
+        float ds=clamp((r-KERR_HORIZON)*.11,.008,.75);
+        float dMino=ds/max(r*r+KERR_A*KERR_A,.2);
+        float oldR=r,oldTheta=theta,oldPhi=phi;
+
+        float dr=radialSign*sqrt(radialPotential)*dMino;
+        float nextR=r+dr;
+        if(kerrRadialPotential(nextR,xi,eta)<0.){
+          radialSign=-radialSign;
+          nextR=r-dr*.35;
+        }
+        r=max(nextR,KERR_HORIZON*.999);
+
+        float dTheta=polarSign*sqrt(polarPotential)*dMino;
+        float nextTheta=theta+dTheta;
+        if(nextTheta<=1e-4||nextTheta>=PI-1e-4||
+           kerrPolarPotential(nextTheta,xi,eta)<0.){
+          polarSign=-polarSign;
+          nextTheta=theta-dTheta*.35;
+        }
+        theta=clamp(nextTheta,1e-4,PI-1e-4);
+
+        float p=oldR*oldR+KERR_A*KERR_A-KERR_A*xi;
+        float oldDelta=max(
+          oldR*oldR-2.*KERR_MASS*oldR+KERR_A*KERR_A,1e-6
+        );
+        float sinTheta=max(abs(sin(oldTheta)),1e-4);
+        float dPhi=xi/(sinTheta*sinTheta)-KERR_A+
+                   KERR_A*p/oldDelta;
+        phi+=dPhi*dMino;
+
+        float oldSide=oldTheta-PI*.5,newSide=theta-PI*.5;
+        if(oldSide*newSide<=0.&&abs(theta-oldTheta)>1e-7){
+          float crossing=abs(oldSide)/
+            max(abs(oldSide)+abs(newSide),1e-7);
+          float hitR=mix(oldR,r,crossing);
+          if(hitR>=RI&&hitR<=RO){
+            float hitPhi=mix(oldPhi,phi,crossing);
+            vec3 disk=plasma(EH/hitR,.92,0.,hitPhi);
+            return falling>.5
+              ?shiftedSpectrum(disk,frequencyShift):disk;
+          }
+        }
+      }
+      return vec3(0);
+    }
+    vec3 kerrSceneBundle(vec3 local,vec3 beamX,vec3 beamY){
+      vec3 center=kerrScene(local);
+
+      float angle=acos(clamp(dot(normalize(local),-radial),-1.,1.));
+      float bundleRadius=clamp(observerU*4.,.035,1.3);
+      float bundleStrength=
+        1.-smoothstep(bundleRadius*.72,bundleRadius,angle);
+      if(bundleStrength<=0.)return center;
+
+      vec3 x=beamX*.5,y=beamY*.5;
+      vec3 filtered=center*.28;
+      filtered+=kerrScene(normalize(local+x+y))*.18;
+      filtered+=kerrScene(normalize(local+x-y))*.18;
+      filtered+=kerrScene(normalize(local-x+y))*.18;
+      filtered+=kerrScene(normalize(local-x-y))*.18;
+      return mix(center,filtered,bundleStrength);
     }
     void main(){
       vec3 observed=normalize(ray);
       vec3 v=observed;
       if(interior>0.){
-        // Compress the entire exterior image continuously toward the outward
-        // direction. Sampling a wider source angle for each observed angle
-        // creates optical flow rather than a stationary image behind a mask.
         float mu=clamp(dot(observed,radial),-1.,1.);
         float observedAngle=acos(mu);
         vec3 transverse=observed-mu*radial;
@@ -351,13 +528,10 @@
       vec2 center=resolution*.5+pan*resolution.y*.5;
       float orbitalPhase=atan(gl_FragCoord.y-center.y,
                               gl_FragCoord.x-center.x);
-      // A smooth Gaussian density profile sampled through the disk atmosphere.
-      // Every layer uses the original geodesic solver; only optical depth varies.
-      vec3 sky=raytracedSpace(v);
+      vec3 disk;
+      vec3 sky=raytracedSpace(v,disk);
       float exteriorWindow=1.,exteriorAttenuation=1.;
       if(interior>0.){
-        // All photons emitted outside the horizon share one outward causal
-        // window. The sky is angularly compressed above; the disk is not.
         float closure=1.-exp(-interior*.32);
         float cone=mix(PI,.012,closure);
         float angle=acos(clamp(dot(observed,radial),-1.,1.));
@@ -365,15 +539,6 @@
         exteriorAttenuation=exp(-interior*.1);
         sky*=exteriorWindow*exteriorAttenuation;
       }
-      // Keep the accretion disk on its solved geodesics. As an exterior emitter
-      // it fades from view instead of being geometrically pulled into the hole.
-      vec3 disk=trace(observed,0.,orbitalPhase)*.34;
-      disk+=trace(normalize(ray+vec3(0,.0042,0)), .42,orbitalPhase)*.245;
-      disk+=trace(normalize(ray-vec3(0,.0042,0)),-.42,orbitalPhase)*.245;
-      disk+=trace(normalize(ray+vec3(0,.0084,0)), .84,orbitalPhase)*.13;
-      disk+=trace(normalize(ray-vec3(0,.0084,0)),-.84,orbitalPhase)*.13;
-      // The disk stays outside and behind the infaller. Its geodesic images
-      // leave view only when their shared outward causal window closes.
       disk*=exteriorWindow*exteriorAttenuation;
       vec3 hdr=sky+disk;
       vec3 mapped=1.-exp(-hdr*.72);
@@ -406,16 +571,12 @@
                 texture(scene,at-vec2(1,0)*px).r),
             texture(scene,at+vec2(0,1)*px).r),
         texture(scene,at-vec2(0,1)*px).r);
-      // Extended plasma blooms. Isolated point stars retain compact halos
-      // instead of exposing the sparse bloom kernel as a cross.
       float bloomSupport=smoothstep(.018,.11,nearby);
       return max(c-vec3(.055),0.)*bloomSupport;
     }
     void main(){
       vec2 px=1./resolution;
       vec3 base=texture(scene,uv).rgb;
-      // Optical scattering inside the hot gas removes sub-pixel geometric
-      // separations while leaving the original lensing solution underneath.
       vec3 meld=base*.28;
       meld+=(texture(scene,uv+vec2( 2.,0.)*px).rgb
             +texture(scene,uv+vec2(-2.,0.)*px).rgb
@@ -458,37 +619,89 @@
       throw Error(gl.getShaderInfoLog(shader));
     return shader;
   };
-  const program = gl.createProgram();
-  gl.attachShader(program, compile(gl.VERTEX_SHADER, vertex));
-  gl.attachShader(program, compile(gl.FRAGMENT_SHADER, fragment));
-  gl.linkProgram(program);
-  if (!gl.getProgramParameter(program, gl.LINK_STATUS))
-    return fail(gl.getProgramInfoLog(program));
-  const postProgram = gl.createProgram();
-  gl.attachShader(postProgram, compile(gl.VERTEX_SHADER, postVertex));
-  gl.attachShader(postProgram, compile(gl.FRAGMENT_SHADER, postFragment));
-  gl.linkProgram(postProgram);
-  if (!gl.getProgramParameter(postProgram, gl.LINK_STATUS))
-    return fail(gl.getProgramInfoLog(postProgram));
+  const makeProgram = (vertexSource, fragmentSource) => {
+    const result = gl.createProgram();
+    gl.attachShader(result, compile(gl.VERTEX_SHADER, vertexSource));
+    gl.attachShader(result, compile(gl.FRAGMENT_SHADER, fragmentSource));
+    gl.linkProgram(result);
+    if (!gl.getProgramParameter(result, gl.LINK_STATUS))
+      return fail(gl.getProgramInfoLog(result));
+    return result;
+  };
+  const program = makeProgram(vertex, fragment);
+  if (!program) return;
+  const postProgram = makeProgram(postVertex, postFragment);
+  if (!postProgram) return;
 
+  const setTextureParameters = (min, mag, wrap) => {
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, min);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, mag);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, wrap);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, wrap);
+  };
   const texture = (data, [w, h], unit) => {
-    const t = gl.createTexture();
+    const result = gl.createTexture(),
+      filter = linear ? gl.LINEAR : gl.NEAREST;
     gl.activeTexture(gl.TEXTURE0 + unit);
-    gl.bindTexture(gl.TEXTURE_2D, t);
-    gl.texParameteri(
-      gl.TEXTURE_2D,
-      gl.TEXTURE_MIN_FILTER,
-      linear ? gl.LINEAR : gl.NEAREST,
-    );
-    gl.texParameteri(
-      gl.TEXTURE_2D,
-      gl.TEXTURE_MAG_FILTER,
-      linear ? gl.LINEAR : gl.NEAREST,
-    );
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.bindTexture(gl.TEXTURE_2D, result);
+    setTextureParameters(filter, filter, gl.CLAMP_TO_EDGE);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, w, h, 0, gl.RED, gl.FLOAT, data);
-    return t;
+    return result;
+  };
+
+  const makeNoiseTexture = (size = 256) => {
+    const data = new Uint8Array(size * size * 4);
+    const frequencies = [7, 11, 19, 47];
+    let state = 0x7f4a7c15;
+    const random = () => {
+      state ^= state << 13;
+      state ^= state >>> 17;
+      state ^= state << 5;
+      return (state >>> 0) / 4294967295;
+    };
+    frequencies.forEach((frequency, channel) => {
+      const lattice = new Float32Array(frequency * frequency);
+      for (let i = 0; i < lattice.length; i++) lattice[i] = random();
+      for (let y = 0; y < size; y++) {
+        const gy = (y / size) * frequency;
+        const iy = Math.floor(gy);
+        const fy = smooth(gy - iy);
+        const iy1 = (iy + 1) % frequency;
+        for (let x = 0; x < size; x++) {
+          const gx = (x / size) * frequency;
+          const ix = Math.floor(gx);
+          const fx = smooth(gx - ix);
+          const ix1 = (ix + 1) % frequency;
+          const a = lattice[iy * frequency + ix];
+          const b = lattice[iy * frequency + ix1];
+          const c = lattice[iy1 * frequency + ix];
+          const d = lattice[iy1 * frequency + ix1];
+          const top = a + (b - a) * fx;
+          const bottom = c + (d - c) * fx;
+          data[(y * size + x) * 4 + channel] = Math.round(
+            (top + (bottom - top) * fy) * 255,
+          );
+        }
+      }
+    });
+
+    const result = gl.createTexture();
+    gl.activeTexture(gl.TEXTURE3);
+    gl.bindTexture(gl.TEXTURE_2D, result);
+    setTextureParameters(gl.LINEAR_MIPMAP_LINEAR, gl.LINEAR, gl.REPEAT);
+    gl.texImage2D(
+      gl.TEXTURE_2D,
+      0,
+      gl.RGBA8,
+      size,
+      size,
+      0,
+      gl.RGBA,
+      gl.UNSIGNED_BYTE,
+      data,
+    );
+    gl.generateMipmap(gl.TEXTURE_2D);
+    return result;
   };
 
   (async () => {
@@ -502,8 +715,10 @@
     gl.useProgram(program);
     texture(cache.subarray(0, DC), D, 0);
     texture(cache.subarray(DC), R, 1);
+    makeNoiseTexture();
     gl.uniform1i(gl.getUniformLocation(program, "deflectionTable"), 0);
     gl.uniform1i(gl.getUniformLocation(program, "radiusTable"), 1);
+    gl.uniform1i(gl.getUniformLocation(program, "noiseTexture"), 3);
     const u = Object.fromEntries(
       [
         "resolution",
@@ -525,7 +740,7 @@
       targetYaw: 0,
       pitch: 0.2,
       targetPitch: 0.2,
-      distance: 7.2,
+      distance: 9,
       panX: 0,
       panY: 0,
       lookYaw: 0,
@@ -536,9 +751,6 @@
     const view = { ...defaults },
       pointers = new Map();
 
-    // A procedural, continuously evolving roar avoids the obvious repetition of
-    // a short audio loop. It begins after the first user gesture, as required by
-    // browser autoplay policies.
     let audio,
       fallMode = false,
       fallSpeed = 0.04,
@@ -546,6 +758,13 @@
       interiorSpeed = 0.4,
       lastAudioUpdate = -Infinity,
       soundEnabled = false;
+    const audioMixOverride = new URLSearchParams(location.search).get("audio");
+    const useMobileAudioMix =
+      audioMixOverride === "mobile" ||
+      (audioMixOverride !== "desktop" &&
+        (Boolean(navigator.userAgentData?.mobile) ||
+          /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) ||
+          matchMedia("(pointer: coarse) and (max-width: 900px)").matches));
     const makeBlackHoleAudio = () => {
       const AudioContext = window.AudioContext || window.webkitAudioContext;
       if (!AudioContext) {
@@ -562,18 +781,19 @@
       const shear = context.createGain();
       const shearFilter = context.createBiquadFilter();
       const compressor = context.createDynamicsCompressor();
-      const pitch = 0.1;
+      const octaveDown = useMobileAudioMix ? 2 : 0.5;
+      const outputBoost = useMobileAudioMix ? 2.2 : 1;
 
       master.gain.value = 0;
       drone.gain.value = 0.7;
       droneFilter.type = "lowpass";
-      droneFilter.frequency.value = 150 * pitch;
+      droneFilter.frequency.value = 150 * octaveDown;
       droneFilter.Q.value = 1.2;
       turbulenceFilter.type = "lowpass";
-      turbulenceFilter.frequency.value = 180 * pitch;
+      turbulenceFilter.frequency.value = 180 * octaveDown;
       turbulenceFilter.Q.value = 0.65;
       shearFilter.type = "bandpass";
-      shearFilter.frequency.value = 420 * pitch;
+      shearFilter.frequency.value = 420 * octaveDown;
       shearFilter.Q.value = 0.8;
       compressor.threshold.value = -20;
       compressor.knee.value = 16;
@@ -597,14 +817,13 @@
         const oscillator = context.createOscillator();
         const gain = context.createGain();
         oscillator.type = type;
-        oscillator.frequency.value = frequency * pitch;
+        oscillator.frequency.value = frequency * octaveDown;
         oscillator.detune.value = (Math.random() - 0.5) * 7;
         gain.gain.value = level;
         oscillator.connect(gain).connect(drone);
         oscillator.start();
       });
 
-      // Integrated random samples create a heavy, non-hissy turbulent bed.
       const noiseBuffer = context.createBuffer(
         1,
         context.sampleRate * 4,
@@ -625,7 +844,6 @@
       noiseSplit.connect(shear);
       noise.start();
 
-      // Slow irregular "pressure" oscillation keeps the roar alive.
       const pressure = context.createOscillator();
       const pressureDepth = context.createGain();
       pressure.type = "sine";
@@ -642,7 +860,8 @@
         turbulenceFilter,
         shear,
         shearFilter,
-        pitch,
+        octaveDown,
+        outputBoost,
       };
     };
     const updateAudio = (immediate = false) => {
@@ -650,28 +869,16 @@
       const now = audio.context.currentTime;
       if (!immediate && fallMode && now - lastAudioUpdate < 0.06) return;
       lastAudioUpdate = now;
-      const diskApproach = Math.max(
-        0,
-        Math.min(
-          1,
-          (AUDIO_FAR_DISTANCE - view.distance) /
-            (AUDIO_FAR_DISTANCE - DISK_INNER_EDGE),
-        ),
+      const diskApproach = clamp(
+        (AUDIO_FAR_DISTANCE - view.distance) /
+          (AUDIO_FAR_DISTANCE - DISK_INNER_EDGE),
       );
-      const smoothApproach =
-        diskApproach * diskApproach * (3 - 2 * diskApproach);
+      const smoothApproach = smooth(diskApproach);
       const rise = (Math.exp(smoothApproach * 4.6) - 1) / (Math.exp(4.6) - 1);
-      const horizonDistance = Math.max(
-        0,
-        Math.min(
-          1,
-          (view.distance - MIN_DISTANCE) / (DISK_INNER_EDGE - MIN_DISTANCE),
-        ),
+      const horizonDistance = clamp(
+        (view.distance - MIN_DISTANCE) / (DISK_INNER_EDGE - MIN_DISTANCE),
       );
-      // The inner disk is the acoustic peak. Inside it, a smooth turning point
-      // rolls the roar down to a muffled residual hum at the horizon.
-      const horizonFade =
-        horizonDistance * horizonDistance * (3 - 2 * horizonDistance);
+      const horizonFade = smooth(horizonDistance);
       const intensity = rise * horizonFade;
       const ambientFloor = 0.007 + 0.021 * horizonFade;
       const ramp = immediate ? 0.01 : 0.12;
@@ -681,21 +888,25 @@
 
       target(
         audio.master.gain,
-        soundEnabled ? (ambientFloor + intensity * 0.54) * interiorSilence : 0,
+        soundEnabled
+          ? (ambientFloor + intensity * 0.54) *
+              interiorSilence *
+              audio.outputBoost
+          : 0,
       );
       target(
         audio.droneFilter.frequency,
-        (145 + intensity * 1050) * audio.pitch,
+        (145 + intensity * 1050) * audio.octaveDown,
       );
       target(audio.turbulence.gain, 0.13 + intensity * 0.62);
       target(
         audio.turbulenceFilter.frequency,
-        (170 + intensity * 1350) * audio.pitch,
+        (170 + intensity * 1350) * audio.octaveDown,
       );
       target(audio.shear.gain, 0.015 + intensity * 0.7);
       target(
         audio.shearFilter.frequency,
-        (380 + intensity * 1750) * audio.pitch,
+        (380 + intensity * 1750) * audio.octaveDown,
       );
     };
     const awakenAudio = () => {
@@ -737,10 +948,7 @@
       gl.viewport(0, 0, w, h);
       gl.activeTexture(gl.TEXTURE2);
       gl.bindTexture(gl.TEXTURE_2D, accTexture);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      setTextureParameters(gl.LINEAR, gl.LINEAR, gl.CLAMP_TO_EDGE);
       gl.texImage2D(
         gl.TEXTURE_2D,
         0,
@@ -770,16 +978,10 @@
       const ease = Math.min(1, dt * 5);
       if (fallMode) {
         if (view.distance > MIN_DISTANCE) {
-          const proximity = Math.max(
-            0,
-            Math.min(
-              1,
-              (defaults.distance - view.distance) /
-                (defaults.distance - MIN_DISTANCE),
-            ),
+          const proximity = clamp(
+            (defaults.distance - view.distance) /
+              (defaults.distance - MIN_DISTANCE),
           );
-          // Accumulate radial velocity so the image accelerates through the
-          // final approach rather than asymptotically freezing at the horizon.
           fallSpeed = Math.min(
             0.4,
             fallSpeed + dt * (0.006 + 0.12 * proximity * proximity),
@@ -787,17 +989,11 @@
           zoomBy(Math.exp(-dt * fallSpeed));
         }
         if (view.distance <= INTERIOR_HANDOFF) {
-          // Ease one continuous interior depth into the exterior trajectory.
-          // There is no second veil curve to create a visible compositing seam.
-          const handoff = Math.max(
-            0,
-            Math.min(
-              1,
-              (INTERIOR_HANDOFF - view.distance) /
-                (INTERIOR_HANDOFF - INTERIOR_HANDOFF_END),
-            ),
+          const handoff = clamp(
+            (INTERIOR_HANDOFF - view.distance) /
+              (INTERIOR_HANDOFF - INTERIOR_HANDOFF_END),
           );
-          const handoffEase = handoff * handoff * (3 - 2 * handoff);
+          const handoffEase = smooth(handoff);
           interiorSpeed = Math.min(
             0.65,
             Math.max(interiorSpeed, fallSpeed) + dt * 0.015,
@@ -856,26 +1052,20 @@
       };
     };
     const zoomBy = (factor) => {
-      // Scale altitude above the horizon rather than the absolute radius. This
-      // gives the final approach enough precision while never crossing r = 0.5.
       const altitude = (view.distance - EVENT_HORIZON) * factor;
       view.distance =
         EVENT_HORIZON +
-        Math.max(
+        clamp(
+          altitude,
           MIN_DISTANCE - EVENT_HORIZON,
-          Math.min(MAX_DISTANCE - EVENT_HORIZON, altitude),
+          MAX_DISTANCE - EVENT_HORIZON,
         );
     };
     const updateChrome = () => {
-      const horizonDistance = Math.max(
-        0,
-        Math.min(
-          1,
-          (view.distance - MIN_DISTANCE) / (DISK_INNER_EDGE - MIN_DISTANCE),
-        ),
+      const horizonDistance = clamp(
+        (view.distance - MIN_DISTANCE) / (DISK_INNER_EDGE - MIN_DISTANCE),
       );
-      const opacity =
-        horizonDistance * horizonDistance * (3 - 2 * horizonDistance);
+      const opacity = smooth(horizonDistance);
       document.body.style.setProperty("--ui-opacity", opacity.toFixed(3));
       document.body.classList.toggle("ui-hidden", opacity < 0.035);
     };
@@ -883,21 +1073,16 @@
       fallMode = enabled;
       if (fallMode && view.distance <= MIN_DISTANCE + 0.002)
         view.distance = defaults.distance;
+      fallSpeed = 0.04;
+      interiorDepth = 0;
+      interiorSpeed = 0.4;
       if (fallMode) {
-        fallSpeed = 0.04;
-        interiorDepth = 0;
-        interiorSpeed = 0.4;
         view.panX = 0;
         view.panY = 0;
         awakenAudio();
       } else {
-        fallSpeed = 0.04;
-        interiorDepth = 0;
-        interiorSpeed = 0.4;
-        view.lookYaw = 0;
-        view.targetLookYaw = 0;
-        view.lookPitch = 0;
-        view.targetLookPitch = 0;
+        view.lookYaw = view.targetLookYaw = 0;
+        view.lookPitch = view.targetLookPitch = 0;
       }
       document.body.classList.toggle("falling", fallMode);
       fall.textContent = fallMode ? "Exit fall" : "Fall mode";
@@ -922,12 +1107,11 @@
       pointers.set(e.pointerId, point);
       const next = readGesture();
       if (fallMode) {
-        // The trajectory owns position in fall mode; dragging only turns the
-        // astronaut's head. Yaw is deliberately unbounded for looking behind.
         view.targetLookYaw -= (point.x - old.x) * 0.006;
-        view.targetLookPitch = Math.max(
+        view.targetLookPitch = clamp(
+          view.targetLookPitch + (point.y - old.y) * 0.0045,
           -1.5,
-          Math.min(1.5, view.targetLookPitch + (point.y - old.y) * 0.0045),
+          1.5,
         );
         gesture = next;
       } else if (next && gesture) {
@@ -943,10 +1127,7 @@
           view.panY -= (dy * 2) / innerHeight;
         } else {
           view.targetYaw -= dx * 0.0045;
-          view.targetPitch = Math.max(
-            -1.42,
-            Math.min(1.42, view.targetPitch + dy * 0.0035),
-          );
+          view.targetPitch = clamp(view.targetPitch + dy * 0.0035, -1.42, 1.42);
         }
       }
       moving();
