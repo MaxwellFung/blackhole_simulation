@@ -1,6 +1,23 @@
 <!doctype html>
 <html lang="en">
   <head>
+    <script type="module">
+      import { initializeApp } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-app.js";
+      import { getAnalytics } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-analytics.js";
+
+      const firebaseConfig = {
+        apiKey: "AIzaSyChI3mpBO-laOLX0ah1jwjjKDcuT4tTMFY",
+        authDomain: "blackholesimulation.firebaseapp.com",
+        projectId: "blackholesimulation",
+        storageBucket: "blackholesimulation.firebasestorage.app",
+        messagingSenderId: "857275145859",
+        appId: "1:857275145859:web:c7672e7b85f2c0674b85b6",
+        measurementId: "G-Z9P22M8RJC",
+      };
+
+      const app = initializeApp(firebaseConfig);
+      const analytics = getAnalytics(app);
+    </script>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#000000" />
@@ -196,38 +213,38 @@
           <stop offset="1" stop-color="#11181d" stop-opacity=".9" />
         </linearGradient>
         <g id="arm">
-        <path
-          d="M-55 1030 C22 934 75 851 128 761 C164 701 201 654 238 622 C258 605 290 616 300 640 C309 663 296 683 276 700 C235 738 211 798 192 866 C175 926 149 984 116 1030Z"
-          fill="url(#suit-fabric)"
-        />
-        <path
-          d="M116 799 C145 806 173 821 198 842 L184 892 C155 871 125 855 95 850Z"
-          fill="#c94d35"
-          opacity=".85"
-        />
-        <path
-          d="M205 686 C232 707 250 725 265 746 L231 787 C211 767 190 750 166 737Z"
-          fill="url(#joint-fabric)"
-        />
-        <g transform="translate(274 651) rotate(39)">
           <path
-            d="M-39 22 C-49-7-36-43-7-56 C20-68 48-53 54-24 L58 22 C54 51 28 68-2 62 C-22 58-34 43-39 22Z"
-            fill="url(#glove-shade)"
+            d="M-55 1030 C22 934 75 851 128 761 C164 701 201 654 238 622 C258 605 290 616 300 640 C309 663 296 683 276 700 C235 738 211 798 192 866 C175 926 149 984 116 1030Z"
+            fill="url(#suit-fabric)"
           />
           <path
-            d="M-25-28 L-41-53 M-6-39 L-14-68 M14-38 L17-67 M31-28 L43-53"
-            fill="none"
-            stroke="#dce0dc"
-            stroke-width="13"
-            stroke-linecap="round"
+            d="M116 799 C145 806 173 821 198 842 L184 892 C155 871 125 855 95 850Z"
+            fill="#c94d35"
+            opacity=".85"
           />
           <path
-            d="M-30 26 C-6 34 21 33 47 17"
-            fill="none"
-            stroke="#687276"
-            stroke-width="8"
+            d="M205 686 C232 707 250 725 265 746 L231 787 C211 767 190 750 166 737Z"
+            fill="url(#joint-fabric)"
           />
-        </g>
+          <g transform="translate(274 651) rotate(39)">
+            <path
+              d="M-39 22 C-49-7-36-43-7-56 C20-68 48-53 54-24 L58 22 C54 51 28 68-2 62 C-22 58-34 43-39 22Z"
+              fill="url(#glove-shade)"
+            />
+            <path
+              d="M-25-28 L-41-53 M-6-39 L-14-68 M14-38 L17-67 M31-28 L43-53"
+              fill="none"
+              stroke="#dce0dc"
+              stroke-width="13"
+              stroke-linecap="round"
+            />
+            <path
+              d="M-30 26 C-6 34 21 33 47 17"
+              fill="none"
+              stroke="#687276"
+              stroke-width="8"
+            />
+          </g>
         </g>
       </defs>
       <use class="left-arm" href="#arm" />
