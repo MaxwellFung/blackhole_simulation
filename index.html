@@ -114,41 +114,13 @@
       #suit .left-arm,
       #suit .right-arm,
       #suit .legs {
-        opacity: 1;
-        transition: opacity 0.16s linear;
-      }
-      #suit .left-arm {
-        transform-origin: 150px 900px;
-        animation: left-drift 5.8s ease-in-out infinite alternate;
-      }
-      #suit .right-arm {
-        transform-origin: 850px 900px;
-        animation: right-drift 6.7s ease-in-out infinite alternate;
-      }
-      #suit .legs {
-        transform-origin: 500px 1050px;
-        animation: leg-drift 7.4s ease-in-out infinite alternate;
+        display: none;
       }
       #suit .visor {
         fill: none;
         stroke: url(#visor-rim);
         stroke-width: 42;
         opacity: 0.6;
-      }
-      @keyframes left-drift {
-        to {
-          transform: rotate(1.8deg) translate(5px, -4px);
-        }
-      }
-      @keyframes right-drift {
-        to {
-          transform: rotate(-2.1deg) translate(-4px, 5px);
-        }
-      }
-      @keyframes leg-drift {
-        to {
-          transform: rotate(0.7deg) translateY(7px);
-        }
       }
       @media (prefers-reduced-motion: reduce) {
         #suit * {
