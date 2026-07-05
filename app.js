@@ -189,7 +189,6 @@
                           r*72.+coarse*4.));
       float filaments=smoothstep(.28,.92,.52*coarse+.72*fine);
       float knots=fbm(orbit*2.1-stir*.30+vec2(0.,r*5.7));
-      float rings=.68+.32*sin(r*82.+coarse*8.-time*.42);
       float rim=rimMask(u,orbitalPhase);
       float outerGas=smoothstep(.36,.96,q);
       float outerFade=smoothstep(.18,.86,q);
@@ -204,7 +203,7 @@
       float eddyB=fbm(orbit*23.0-stir.yx*1.55+
                       vec2(-r*8.5,height*15.0));
       float churn=smoothstep(.26,.80,.54*eddyA+.46*eddyB);
-      float density=mix(.34,1.08,filaments)*mix(.86,1.15,rings);
+      float density=mix(.42,1.10,filaments);
       density*=mix(.72,1.32,smoothstep(.22,.86,knots));
       density*=mix(.62,1.42,churn);
       density*=exp(-height*height*2.2);
@@ -378,13 +377,10 @@
         exteriorAttenuation=exp(-interior*.1);
         sky*=exteriorWindow*exteriorAttenuation;
       }
-      // Keep the accretion disk on its solved geodesics. As an exterior emitter
-      // it fades from view instead of being geometrically pulled into the hole.
-      vec3 disk=trace(observed,0.,orbitalPhase)*.34;
-      disk+=trace(normalize(ray+vec3(0,.0042,0)), .42,orbitalPhase)*.245;
-      disk+=trace(normalize(ray-vec3(0,.0042,0)),-.42,orbitalPhase)*.245;
-      disk+=trace(normalize(ray+vec3(0,.0084,0)), .84,orbitalPhase)*.13;
-      disk+=trace(normalize(ray-vec3(0,.0084,0)),-.84,orbitalPhase)*.13;
+      // Keep the accretion disk on its solved geodesics. A single luminous
+      // stream avoids the stacked line artifacts that appear when lensed height
+      // slices separate near the photon ring.
+      vec3 disk=trace(observed,0.,orbitalPhase)*1.05;
       // The disk stays outside and behind the infaller. Its geodesic images
       // leave view only when their shared outward causal window closes.
       disk*=exteriorWindow*exteriorAttenuation;
@@ -438,7 +434,7 @@
             +texture(scene,uv+vec2(-5., 5.)*px).rgb
             +texture(scene,uv+vec2( 5.,-5.)*px).rgb
             +texture(scene,uv+vec2(-5.,-5.)*px).rgb)*.075;
-      float luminous=smoothstep(.018,.34,max(meld.r,max(meld.g,meld.b)));
+      float luminous=smoothstep(.012,.28,max(meld.r,max(meld.g,meld.b)));
       float localEnergy=(
         max(texture(scene,uv+vec2(1,0)*px).r,
             texture(scene,uv+vec2(1,0)*px).g)
@@ -448,8 +444,8 @@
             texture(scene,uv+vec2(0,1)*px).g)
        +max(texture(scene,uv-vec2(0,1)*px).r,
             texture(scene,uv-vec2(0,1)*px).g))*.25;
-      float extendedSource=smoothstep(.10,.30,localEnergy);
-      base=mix(base,meld,luminous*extendedSource*.68);
+      float extendedSource=smoothstep(.055,.22,localEnergy);
+      base=mix(base,meld,luminous*extendedSource*.74);
       vec3 near=fire(uv)*.20;
       near+=(fire(uv+vec2( 4.,0.)*px)+fire(uv+vec2(-4.,0.)*px)
             +fire(uv+vec2(0., 4.)*px)+fire(uv+vec2(0.,-4.)*px))*.105;
