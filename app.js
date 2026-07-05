@@ -139,6 +139,22 @@
       for(int i=0;i<4;i++){n+=a*noise(p);p=m*p+7.13;a*=.48;}
       return n;
     }
+    float rimMask(float u,float orbitalPhase){
+      float r=EH/max(u,1e-5);
+      float q=clamp((r-RI)/(RO-RI),0.,1.);
+      float textureTime=min(time,1.45);
+      float drift=orbitalPhase-time*(.95/pow(r,1.5));
+      vec2 orbit=vec2(cos(drift),sin(drift));
+      float edge=smoothstep(.70,1.,q);
+      float broad=fbm(orbit*2.6+vec2(textureTime*.025,r*.85));
+      float fine=fbm(orbit*10.5+vec2(-textureTime*.11,r*3.9+broad*2.4));
+      float scallop=.5+.5*sin(drift*12.+broad*7.+r*2.2);
+      float ragged=smoothstep(.30,.76,.50*broad+.32*fine+.18*scallop);
+      float reach=mix(.72,.985,ragged);
+      float feather=mix(.18,.055,ragged);
+      float taper=1.-smoothstep(reach,min(1.,reach+feather),q);
+      return mix(1.,mix(.08,1.,ragged)*taper,edge);
+    }
     float hash31(vec3 p){
       p=fract(p*vec3(443.897,441.423,437.195));
       p+=dot(p,p.yzx+19.19);
@@ -155,6 +171,7 @@
     vec3 plasma(float u,float opacity,float height,float orbitalPhase){
       float r=EH/max(u,1e-5);
       float q=clamp((r-RI)/(RO-RI),0.,1.);
+      float textureTime=min(time,1.45);
       // Keplerian shear: the inner gas completes an orbit much faster.
       float spin=time*(2.3/pow(r,1.5));
       // Screen-space phase avoids the parity reversal of secondary lens images.
@@ -162,26 +179,27 @@
       float angle=orbitalPhase-spin;
       vec2 orbit=vec2(cos(angle),sin(angle));
       vec2 flow=orbit*5.2+
-                vec2(r*7.5+height*9.,r*20.-time*.17);
+                vec2(r*7.5+height*9.,r*20.-textureTime*.17);
       float coarse=fbm(flow);
       float fine=fbm(orbit*18.+
                      vec2(-r*9.+height*21.,
-                          r*72.+coarse*4.-time*.65));
+                          r*72.+coarse*4.-textureTime*.65));
       float filaments=smoothstep(.28,.92,.52*coarse+.72*fine);
-      float knots=fbm(orbit*2.1+vec2(-time*.08,r*5.7));
-      float rings=.68+.32*sin(r*82.+coarse*8.-time*.8);
+      float knots=fbm(orbit*2.1+vec2(-textureTime*.08,r*5.7));
+      float rings=.68+.32*sin(r*82.+coarse*8.-textureTime*.8);
+      float rim=rimMask(u,orbitalPhase);
       float outerGas=smoothstep(.36,.96,q);
-      float outerFade=smoothstep(.44,1.0,q);
+      float outerFade=smoothstep(.18,.86,q);
       float outerTint=smoothstep(.54,1.0,q);
       float rimGas=smoothstep(.78,.97,q);
-      float gapField=.52*fbm(orbit*3.4+vec2(time*.05,r*2.3))+
-                     .48*fbm(orbit*13.5+vec2(-time*.16,r*6.8));
+      float gapField=.52*fbm(orbit*3.4+vec2(textureTime*.05,r*2.3))+
+                     .48*fbm(orbit*13.5+vec2(-textureTime*.16,r*6.8));
       float intermittent=mix(1.,smoothstep(.38,.78,gapField),rimGas);
       float wispiness=mix(1.,mix(.36,1.08,smoothstep(.18,.88,fine)),outerFade);
       float density=mix(.34,1.08,filaments)*mix(.86,1.15,rings);
       density*=mix(.72,1.32,smoothstep(.22,.86,knots));
       density*=exp(-height*height*2.2);
-      density*=mix(1.,.50,outerFade)*intermittent*wispiness;
+      density*=mix(1.,.28,outerFade)*intermittent*wispiness*rim;
       float heat=pow(1.-q,.42);
       float hot=pow(heat,2.2)*mix(.52,1.48,fine)*mix(.8,1.25,knots);
       vec3 copper=vec3(1.0,.19,.025);
@@ -191,7 +209,7 @@
       tint=mix(tint,white,smoothstep(.48,1.08,hot));
       tint=mix(tint,vec3(.78,.36,.13),outerTint*.62);
       float beaming=.78+.32*sin(orbitalPhase+1.1);
-      float gasGlow=mix(1.15+5.8*hot,.46+2.35*hot,outerFade);
+      float gasGlow=mix(1.15+5.8*hot,.26+1.36*hot,outerFade);
       return tint*opacity*density*gasGlow*beaming;
     }
     vec3 fallRay(vec3 local,out float frequencyShift){
@@ -279,7 +297,9 @@
       // without changing the solved geodesic silhouette.
       float halo0=v0?pulse(UO*.965,(EH/RI)*1.015,u0,max(w0,.006)):0.;
       float halo1=v1?pulse(UO*.965,(EH/RI)*1.015,u1,max(w1,.006)):0.;
-      light+=vec3(1.,.25,.045)*.11*(halo0+halo1);
+      float rim0=v0?rimMask(u0,orbitalPhase):0.;
+      float rim1=v1?rimMask(u1,orbitalPhase):0.;
+      light+=vec3(1.,.25,.045)*.11*(halo0*rim0+halo1*rim1);
       if(falling>.5)
         light=shiftedSpectrum(light,clamp(shift,.35,1.8));
       return light;
@@ -447,6 +467,9 @@
       wide+=(fire(uv+vec2( 17., 9.)*px)+fire(uv+vec2(-17., 9.)*px)
             +fire(uv+vec2( 17.,-9.)*px)+fire(uv+vec2(-17.,-9.)*px))*.034;
       vec3 glow=(near+wide)*vec3(1.08,.72,.46);
+      float source=max(base.r,max(base.g,base.b));
+      float shadowKeep=smoothstep(.012,.075,source);
+      glow*=shadowKeep;
       color=vec4(1.-(1.-base)*exp(-glow*1.72),1);
     }`;
 
