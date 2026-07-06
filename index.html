@@ -557,10 +557,15 @@
               <dd>14.4 r_s = 7.2 renderer units from the black hole.</dd>
             </div>
             <div>
-              <dt>Fall endpoint</dt>
+              <dt>Free-fall trajectory</dt>
               <dd>
-                The camera approaches just outside the horizon at about 1.0015 r_s
-                before the interior visual handoff.
+                The fall mode advances a radial geodesic dropped from rest at
+                infinity. The simulated observer crosses r_s; the exterior
+                renderer samples at about 1.0015 r_s during the interior
+                handoff to avoid the Schwarzschild coordinate singularity, and
+                the post-horizon display clock is stretched so crossing does
+                not look like a hard cut before the final fade toward the
+                singularity.
               </dd>
             </div>
             <div>
@@ -590,7 +595,7 @@
               beaming.
             </li>
             <li>
-              Free-fall view aberration as the camera approaches the horizon.
+              Free-fall view aberration and a proper-time horizon crossing.
             </li>
           </ul>
         </section>
@@ -608,6 +613,10 @@
             <li>
               The disk Doppler field is screen-continuous, not a full per-ray
               emitter four-velocity solve.
+            </li>
+            <li>
+              Interior rendering uses a causal light-cone compression visual,
+              not full null geodesics in horizon-regular coordinates.
             </li>
             <li>
               The higher-order photon ring is a faint critical-curve cue, not a

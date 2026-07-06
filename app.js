@@ -27,9 +27,11 @@
     R = [256, 128],
     EVENT_HORIZON = 0.5,
     DISK_INNER_EDGE = 1.5,
-    MIN_DISTANCE = 0.50075,
-    INTERIOR_HANDOFF = 1.25,
-    INTERIOR_HANDOFF_END = 1.05,
+    MIN_DISTANCE = EVENT_HORIZON * 1.0015,
+    FALL_PROPER_TIME_RATE = 1,
+    HORIZON_TO_SINGULARITY = (2 * EVENT_HORIZON) / 3,
+    INTERIOR_TIME_STRETCH = 24,
+    SINGULARITY_VISUAL_DEPTH = 4.5,
     AUDIO_FAR_DISTANCE = 12,
     MAX_DISTANCE = 48;
   const DC = D[0] * D[1],
@@ -359,11 +361,26 @@
         light=shiftedSpectrum(light,clamp(shift,.35,1.8));
       return light;
     }
-    vec3 spaceColor(vec3 d){
+    vec3 spaceColor(vec3 d,float starVisibility){
       d=normalize(d);
-      vec3 cell=floor(d*620.);
+      vec3 grid=d*620.;
+      vec3 cell=floor(grid);
+      vec3 local=fract(grid)-.5;
       float h=hash31(cell);
-      float star=smoothstep(.9965,1.,h);
+      vec3 starOffset=vec3(hash31(cell+11.),
+                           hash31(cell+29.),
+                           hash31(cell+47.))-.5;
+      vec3 starPoint=local-starOffset*.30;
+      float starDistance=length(starPoint);
+      float starSize=mix(.045,.095,pow(hash31(cell+83.),2.));
+      float starEdge=max(fwidth(starDistance),.006);
+      float starCore=1.-smoothstep(starSize,starSize+starEdge,starDistance);
+      float haloRadius=starSize*2.75;
+      float starGlow=exp(-starDistance*starDistance/
+                         max(starSize*starSize*4.4,1e-4))*
+                     (1.-smoothstep(haloRadius*.72,haloRadius,starDistance))*
+                     .24;
+      float star=smoothstep(.9958,1.,h)*(starCore+starGlow)*starVisibility;
       float twinkle=.97+.03*sin(time*(.45+h)+h*53.);
       vec3 tint=mix(vec3(.48,.62,1.),vec3(1.,.74,.46),hash31(cell+7.));
       float milky=pow(max(0.,1.-abs(d.y*.72+d.x*.18)),8.);
@@ -373,6 +390,9 @@
       sky+=vec3(.018,.022,.032)*milky*dust;
       return sky;
     }
+    vec3 spaceColor(vec3 d){
+      return spaceColor(d,1.);
+    }
     vec3 raytracedSpace(vec3 local){
       // This is the numerical light-path integration from the reference
       // renderer, expressed in the same Schwarzschild units as the lookup
@@ -380,6 +400,8 @@
       const float HORIZON=EH;
       vec3 pos=radial*(EH/max(observerU,1e-6));
       float frequencyShift=1.;
+      float centerPointStarFade=falling>.5?
+        smoothstep(.04,.18,length(normalize(local)+radial)):1.;
       vec3 dir;
       if(falling>.5)dir=fallRay(local,frequencyShift);
       else dir=normalize(local);
@@ -387,7 +409,7 @@
         float r=length(pos);
         if(r<HORIZON*1.001)return vec3(0);
         if(r>46.&&dot(pos,dir)>0.){
-          vec3 sky=spaceColor(dir);
+          vec3 sky=spaceColor(dir,centerPointStarFade);
           return falling>.5?shiftedSpectrum(sky,frequencyShift):sky;
         }
 
@@ -405,6 +427,26 @@
       // Rays still orbiting after the full budget belong to the shadow.
       return vec3(0);
     }
+    vec3 interiorOutsideRay(vec3 observed){
+      float closure=1.-exp(-interior*.22);
+      float cone=mix(PI,.34,closure);
+      float mu=clamp(dot(observed,radial),-1.,1.);
+      float angle=acos(mu);
+      vec3 tangent=observed-mu*radial;
+      float tl=length(tangent);
+      if(tl<1e-5){
+        vec3 helper=abs(radial.y)<.95?vec3(0,1,0):vec3(1,0,0);
+        tangent=normalize(cross(cross(radial,helper),radial));
+      }else tangent/=tl;
+
+      // After the horizon handoff, outside light is still sampled from the
+      // exterior Schwarzschild solution, but the visible sky is angularly
+      // squeezed toward the outward light cone instead of simply fading out.
+      float folded=angle*cone/PI;
+      vec3 foldedRay=normalize(cos(folded)*radial+sin(folded)*tangent);
+      vec3 axisRay=mu>=0.?radial:-radial;
+      return normalize(mix(axisRay,foldedRay,smoothstep(.0,.035,tl)));
+    }
     void main(){
       vec3 observed=normalize(ray);
       vec2 center=resolution*.5+pan*resolution.y*.5;
@@ -412,27 +454,43 @@
                               gl_FragCoord.x-center.x);
       // A smooth Gaussian density profile sampled through the disk atmosphere.
       // Every layer uses the original geodesic solver; only optical depth varies.
-      vec3 sky=raytracedSpace(observed);
-      float exteriorWindow=1.,exteriorAttenuation=1.;
+      vec3 exteriorRay=observed;
+      float interiorClosure=0.;
+      float exteriorAttenuation=1.;
+      float terminalFade=1.;
+      float interiorCaustic=0.;
       if(interior>0.){
-        // All photons emitted outside the horizon share one outward causal
-        // window. The sky is angularly compressed above; the disk is not.
-        float closure=1.-exp(-interior*.32);
-        float cone=mix(PI,.012,closure);
+        interiorClosure=1.-exp(-interior*.22);
+        exteriorRay=interiorOutsideRay(observed);
         float angle=acos(clamp(dot(observed,radial),-1.,1.));
-        exteriorWindow=1.-smoothstep(cone*.78,cone,angle);
-        exteriorAttenuation=exp(-interior*.1);
-        sky*=exteriorWindow*exteriorAttenuation;
+        float rim=abs(angle/PI-.72);
+        terminalFade=1.-smoothstep(4.2,8.4,interior);
+        interiorCaustic=interiorClosure*exp(-rim*rim*170.)*terminalFade;
+        exteriorAttenuation=exp(-interior*.035)*terminalFade;
       }
+      vec3 sky=raytracedSpace(exteriorRay);
+      if(interior>0.){
+        // Once inside, a shrinking outside light cone should dim continuously.
+        // Blend away from the exterior escape/capture test so rays do not
+        // all snap black when the compressed cone crosses the photon shadow.
+        float centerPointStarFade=smoothstep(.04,.18,
+                                             length(observed+radial));
+        vec3 coneSky=shiftedSpectrum(spaceColor(exteriorRay,
+                                                centerPointStarFade),
+                                     mix(.96,.72,interiorClosure));
+        sky=mix(sky,coneSky,smoothstep(.06,.75,interior));
+      }
+      sky*=exteriorAttenuation;
       // Keep the accretion disk on its solved geodesics. A single luminous
       // stream avoids the stacked line artifacts that appear when lensed height
       // slices separate near the photon ring.
-      vec3 disk=(trace(observed,0.,orbitalPhase)
-                +higherOrderRing(observed,orbitalPhase))*1.05;
+      vec3 disk=(trace(exteriorRay,0.,orbitalPhase)
+                +higherOrderRing(exteriorRay,orbitalPhase))*1.05;
       // The disk stays outside and behind the infaller. Its geodesic images
       // leave view only when their shared outward causal window closes.
-      disk*=exteriorWindow*exteriorAttenuation;
+      disk*=exteriorAttenuation;
       vec3 hdr=sky+disk;
+      hdr+=vec3(1.,.34,.07)*interiorCaustic*.08*exteriorAttenuation;
       vec3 mapped=1.-exp(-hdr*.72);
       mapped=pow(mapped,vec3(.82));
       float grain=hash21(gl_FragCoord.xy)-.5;
@@ -601,9 +659,9 @@
     // browser autoplay policies.
     let audio,
       fallMode = false,
-      fallSpeed = 0.04,
+      fallRadius = defaults.distance,
+      insideProperTime = 0,
       interiorDepth = 0,
-      interiorSpeed = 0.4,
       lastAudioUpdate = -Infinity,
       soundEnabled = false;
     const makeBlackHoleAudio = () => {
@@ -830,40 +888,28 @@
       previousTime = now;
       const ease = Math.min(1, dt * 5);
       if (fallMode) {
-        if (view.distance > MIN_DISTANCE) {
-          const proximity = Math.max(
+        const properStep = dt * FALL_PROPER_TIME_RATE;
+        if (fallRadius > 0) {
+          // Radial geodesic for an observer dropped from rest at infinity:
+          // dr/dtau = -sqrt(r_s / r). The displayed Schwarzschild coordinate
+          // is clamped just outside r_s because the exterior chart is singular
+          // at the horizon, but the simulated worldline keeps crossing.
+          const safeRadius = Math.max(fallRadius, EVENT_HORIZON);
+          fallRadius = Math.max(
             0,
-            Math.min(
-              1,
-              (defaults.distance - view.distance) /
-                (defaults.distance - MIN_DISTANCE),
-            ),
+            fallRadius - Math.sqrt(EVENT_HORIZON / safeRadius) * properStep,
           );
-          // Accumulate radial velocity so the image accelerates through the
-          // final approach rather than asymptotically freezing at the horizon.
-          fallSpeed = Math.min(
-            0.4,
-            fallSpeed + dt * (0.006 + 0.12 * proximity * proximity),
-          );
-          zoomBy(Math.exp(-dt * fallSpeed));
+          view.distance = Math.max(MIN_DISTANCE, fallRadius);
         }
-        if (view.distance <= INTERIOR_HANDOFF) {
-          // Ease one continuous interior depth into the exterior trajectory.
-          // There is no second veil curve to create a visible compositing seam.
-          const handoff = Math.max(
-            0,
-            Math.min(
-              1,
-              (INTERIOR_HANDOFF - view.distance) /
-                (INTERIOR_HANDOFF - INTERIOR_HANDOFF_END),
-            ),
-          );
-          const handoffEase = handoff * handoff * (3 - 2 * handoff);
-          interiorSpeed = Math.min(
-            0.65,
-            Math.max(interiorSpeed, fallSpeed) + dt * 0.015,
-          );
-          interiorDepth += dt * interiorSpeed * handoffEase;
+        if (fallRadius <= EVENT_HORIZON) {
+          insideProperTime += properStep;
+          // Scale-free black-hole units can make horizon-to-singularity time
+          // visually tiny. Stretch only the display clock so crossing the
+          // horizon remains locally uneventful.
+          interiorDepth =
+            (insideProperTime /
+              (HORIZON_TO_SINGULARITY * INTERIOR_TIME_STRETCH)) *
+            SINGULARITY_VISUAL_DEPTH;
         }
         updateAudio();
         updateChrome();
@@ -945,16 +991,16 @@
       if (fallMode && view.distance <= MIN_DISTANCE + 0.002)
         view.distance = defaults.distance;
       if (fallMode) {
-        fallSpeed = 0.04;
+        fallRadius = view.distance;
+        insideProperTime = 0;
         interiorDepth = 0;
-        interiorSpeed = 0.4;
         view.panX = 0;
         view.panY = 0;
         awakenAudio();
       } else {
-        fallSpeed = 0.04;
+        fallRadius = view.distance;
+        insideProperTime = 0;
         interiorDepth = 0;
-        interiorSpeed = 0.4;
         view.lookYaw = 0;
         view.targetLookYaw = 0;
         view.lookPitch = 0;
