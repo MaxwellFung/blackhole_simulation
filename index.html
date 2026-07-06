@@ -248,12 +248,15 @@
         top: 50%;
         left: 50%;
         width: min(760px, calc(100vw - 32px));
+        max-width: calc(100vw - 32px);
         max-height: min(760px, calc(100vh - 32px));
+        max-height: min(760px, calc(100dvh - 32px));
         margin: 0;
         border: 1px solid #555;
         padding: 0;
         background: #050505;
         color: #fff;
+        overflow: hidden;
         transform: translate(-50%, -50%);
         box-shadow: 0 24px 80px #000;
       }
@@ -261,10 +264,13 @@
         background: rgb(0 0 0 / 0.72);
       }
       .info-sheet {
-        max-height: inherit;
+        max-height: min(760px, calc(100vh - 32px));
+        max-height: min(760px, calc(100dvh - 32px));
         overflow: auto;
+        overscroll-behavior: contain;
         padding: 22px 24px 24px;
         text-transform: none;
+        -webkit-overflow-scrolling: touch;
       }
       .info-title {
         display: flex;
@@ -453,6 +459,50 @@
           right: 18px;
           bottom: 18px;
           max-width: 220px;
+        }
+        dialog {
+          --info-dialog-top: max(10px, env(safe-area-inset-top));
+          --info-dialog-right: max(10px, env(safe-area-inset-right));
+          --info-dialog-bottom: max(10px, env(safe-area-inset-bottom));
+          --info-dialog-left: max(10px, env(safe-area-inset-left));
+          top: var(--info-dialog-top);
+          right: var(--info-dialog-right);
+          bottom: var(--info-dialog-bottom);
+          left: var(--info-dialog-left);
+          width: auto;
+          height: calc(
+            100vh - var(--info-dialog-top) - var(--info-dialog-bottom)
+          );
+          height: calc(
+            100dvh - var(--info-dialog-top) - var(--info-dialog-bottom)
+          );
+          max-width: none;
+          max-height: calc(
+            100vh - var(--info-dialog-top) - var(--info-dialog-bottom)
+          );
+          max-height: calc(
+            100dvh - var(--info-dialog-top) - var(--info-dialog-bottom)
+          );
+          transform: none;
+        }
+        .info-sheet {
+          height: 100%;
+          max-height: none;
+          padding: 18px 16px;
+        }
+        .info-title {
+          gap: 12px;
+        }
+        .info-title p {
+          max-width: 24ch;
+        }
+        .info-close {
+          padding: 7px 9px;
+        }
+        .equations div,
+        .parameters div {
+          padding-right: 8px;
+          padding-left: 8px;
         }
         .parameters div {
           grid-template-columns: 1fr;
