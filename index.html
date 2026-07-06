@@ -21,7 +21,136 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#000000" />
-    <title>Schwarzschild Black Hole Lensing</title>
+    <meta name="color-scheme" content="dark" />
+    <meta name="application-name" content="Black Hole Simulation" />
+    <meta name="apple-mobile-web-app-title" content="Black Hole Simulation" />
+    <meta
+      name="description"
+      content="Interactive black hole simulation with Schwarzschild gravitational lensing, an accretion disk, photon ring, relativistic Doppler effects, and fall mode through the event horizon."
+    />
+    <meta
+      name="keywords"
+      content="black hole simulation, black hole, Schwarzschild black hole, gravitational lensing, accretion disk, event horizon, photon sphere, photon ring, relativity simulation, general relativity, space simulation, interactive astronomy"
+    />
+    <meta name="author" content="Maxwell Fung" />
+    <meta name="creator" content="Maxwell Fung" />
+    <meta name="publisher" content="Maxwell Fung" />
+    <meta name="robots" content="index, follow, max-image-preview:large" />
+    <meta
+      name="googlebot"
+      content="index, follow, max-image-preview:large"
+    />
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
+    <link rel="canonical" href="https://blackholesimulation.firebaseapp.com/" />
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="manifest" href="/site.webmanifest" />
+    <meta
+      property="og:title"
+      content="Black Hole Simulation - Interactive Schwarzschild Lensing"
+    />
+    <meta
+      property="og:description"
+      content="Explore an interactive black hole simulation with gravitational lensing, a glowing accretion disk, photon ring structure, Doppler beaming, and fall mode near the event horizon."
+    />
+    <meta property="og:type" content="website" />
+    <meta
+      property="og:url"
+      content="https://blackholesimulation.firebaseapp.com/"
+    />
+    <meta property="og:site_name" content="Black Hole Simulation" />
+    <meta property="og:locale" content="en_US" />
+    <meta
+      property="og:image"
+      content="https://blackholesimulation.firebaseapp.com/preview.png"
+    />
+    <meta
+      property="og:image:alt"
+      content="Interactive black hole simulation showing Schwarzschild lensing and a bright accretion disk around a black hole shadow."
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta
+      name="twitter:title"
+      content="Black Hole Simulation - Interactive Schwarzschild Lensing"
+    />
+    <meta
+      name="twitter:description"
+      content="Interactive WebGL black hole simulation showing Schwarzschild lensing, an accretion disk, photon ring, gravitational redshift, and fall mode."
+    />
+    <meta
+      name="twitter:image"
+      content="https://blackholesimulation.firebaseapp.com/preview.png"
+    />
+    <meta
+      name="twitter:image:alt"
+      content="Interactive black hole simulation with accretion disk lensing and photon ring."
+    />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "Black Hole Simulation",
+        "alternateName": [
+          "Schwarzschild Black Hole Lensing",
+          "Interactive Black Hole Simulator",
+          "Black Hole Lensing Simulation"
+        ],
+        "url": "https://blackholesimulation.firebaseapp.com/",
+        "applicationCategory": "EducationalApplication",
+        "operatingSystem": "Any modern browser with WebGL 2",
+        "browserRequirements": "Requires WebGL 2",
+        "image": "https://blackholesimulation.firebaseapp.com/preview.png",
+        "thumbnailUrl": "https://blackholesimulation.firebaseapp.com/preview.png",
+        "description": "Interactive WebGL black hole simulation with Schwarzschild gravitational lensing, accretion disk rendering, photon sphere cues, relativistic Doppler effects, redshift, and fall mode through the event horizon.",
+        "keywords": [
+          "black hole simulation",
+          "black hole simulator",
+          "Schwarzschild black hole",
+          "gravitational lensing",
+          "event horizon",
+          "accretion disk",
+          "photon ring",
+          "photon sphere",
+          "general relativity",
+          "relativity simulation",
+          "space simulation"
+        ],
+        "author": {
+          "@type": "Person",
+          "name": "Maxwell Fung",
+          "affiliation": {
+            "@type": "CollegeOrUniversity",
+            "name": "UC Berkeley"
+          }
+        },
+        "creator": {
+          "@type": "Person",
+          "name": "Maxwell Fung"
+        },
+        "isAccessibleForFree": true,
+        "inLanguage": "en",
+        "learningResourceType": "Simulation",
+        "educationalUse": [
+          "visualization",
+          "interactive learning",
+          "physics education"
+        ],
+        "about": [
+          {
+            "@type": "Thing",
+            "name": "Black hole"
+          },
+          {
+            "@type": "Thing",
+            "name": "Gravitational lensing"
+          },
+          {
+            "@type": "Thing",
+            "name": "General relativity"
+          }
+        ]
+      }
+    </script>
+    <title>Black Hole Simulation - Interactive Schwarzschild Lensing</title>
     <style>
       * {
         box-sizing: border-box;
@@ -261,6 +390,14 @@
         text-decoration: underline;
         outline: 0;
       }
+      .seo-copy {
+        position: fixed;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+      }
       #suit {
         position: fixed;
         z-index: 1;
@@ -330,9 +467,25 @@
       aria-label="Schwarzschild black hole lensing visualization with a luminous accretion disk. Drag to orbit, shift-drag to move, and scroll to zoom."
     ></canvas>
     <header>
-      <h1>Black hole</h1>
-      <p>Schwarzschild metric lensing</p>
+      <h1>Black hole simulation</h1>
+      <p>Interactive Schwarzschild gravitational lensing</p>
     </header>
+    <main class="seo-copy">
+      <h2>Interactive black hole simulation</h2>
+      <p>
+        This browser-based black hole simulation visualizes a non-spinning
+        Schwarzschild black hole with gravitational lensing, a luminous
+        accretion disk, photon ring cues, relativistic Doppler color shift,
+        redshift, bloom, and an optional fall mode that approaches and crosses
+        the event horizon.
+      </p>
+      <p>
+        The simulation is designed for physics education, astronomy learning,
+        and general relativity visualization. It runs in WebGL 2 and explains
+        the modeled equations, parameters, approximations, and limitations in
+        the physics information panel.
+      </p>
+    </main>
     <div class="controls">
       <button id="fall" type="button" aria-pressed="false">Fall mode</button>
       <button id="sound" type="button" aria-pressed="false">Sound: off</button>
@@ -350,6 +503,17 @@
     <div class="help">
       Drag: orbit · Shift drag: move<br />Wheel or pinch: zoom
     </div>
+    <noscript>
+      <section>
+        <h2>Black Hole Simulation</h2>
+        <p>
+          This interactive black hole simulation requires JavaScript and WebGL
+          2. It visualizes Schwarzschild gravitational lensing, an accretion
+          disk, photon ring cues, redshift, Doppler beaming, and fall mode near
+          the event horizon.
+        </p>
+      </section>
+    </noscript>
     <dialog id="info" aria-labelledby="info-heading">
       <div class="info-sheet">
         <div class="info-title">

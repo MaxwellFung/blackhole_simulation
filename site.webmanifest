@@ -1,0 +1,22 @@
+{
+  "name": "Black Hole Simulation",
+  "short_name": "Black Hole",
+  "description": "Interactive Schwarzschild black hole simulation with gravitational lensing, accretion disk rendering, photon ring cues, and fall mode.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "fullscreen",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "categories": [
+    "education",
+    "science",
+    "simulation"
+  ],
+  "icons": [
+    {
+      "src": "/favicon.ico",
+      "sizes": "any",
+      "type": "image/x-icon"
+    }
+  ]
+}

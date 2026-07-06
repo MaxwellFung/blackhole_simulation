@@ -179,12 +179,7 @@
       float q=clamp((r-RI)/(RO-RI),0.,1.);
       vec2 stir=vec2(cos(time*.43),sin(time*.31));
       vec2 stirFine=vec2(cos(time*.79+1.7),sin(time*.53+2.3));
-      // The plasma orbits forward, but the visible turbulence uses limited
-      // differential shear so eddies are replenished instead of winding into
-      // uniform circular bands.
       float spin=time*(.62+.42/pow(r,.65));
-      // Screen-space phase avoids the parity reversal of secondary lens images.
-      // Subtracting spin makes every visible feature advance counterclockwise.
       float angle=orbitalPhase-spin;
       vec2 orbit=vec2(cos(angle),sin(angle));
       vec2 flow=orbit*5.2+
@@ -227,9 +222,6 @@
       return shiftedSpectrum(tint,shift)*opacity*density*gasGlow;
     }
     vec3 fallRay(vec3 local,out float frequencyShift){
-      // Exact local aberration for a radial geodesic dropped from rest at
-      // infinity: its speed relative to a stationary Schwarzschild observer is
-      // beta=sqrt(r_s/r). "local" points toward the observed source.
       vec3 observed=normalize(local);
       float beta=sqrt(clamp(observerU,0.,.999999));
       float mu=dot(observed,radial);
@@ -239,13 +231,7 @@
       vec3 stationary=normalize(
         staticMu*radial+transverse*lapse/denominator
       );
-
-      // Conserved photon energy gives nu_observer/nu_infinity. Directly behind
-      // the infaller this approaches 1/2 at the event horizon, not zero.
       frequencyShift=(1.-beta*staticMu)/max(lapse*lapse,1e-6);
-
-      // Convert the stationary observer's orthonormal radial component to the
-      // Schwarzschild spatial coordinate used by the geodesic integrator.
       float radialPart=dot(stationary,radial);
       return normalize(
         stationary+radialPart*(lapse-1.)*radial
@@ -265,14 +251,10 @@
                       color.b+.42*color.g);
         color=mix(color,hot,blue);
       }
-      // I_nu/nu^3 is invariant along a vacuum null geodesic.
       return color*clamp(g*g*g,.015,12.);
     }
     float diskShift(){
       float observerLapse=max(lapse,.18);
-      // A screen-continuous approximation to Schwarzschild circular-orbit
-      // Doppler beaming. Keeping it independent of the lensed branch removes
-      // nonphysical brightness seams between primary and secondary images.
       float beta=.44;
       float gamma=1./sqrt(max(1.-beta*beta,1e-4));
       float inclination=sqrt(max(1.-radial.y*radial.y,0.));
@@ -294,9 +276,6 @@
       float e=ud*ud+observerU*observerU*(1.-observerU);
       float critical=abs(e/MU-1.);
       float aa=max(fwidth(e/MU),1e-5);
-
-      // Near e = MU, rays skim the photon sphere. This adds a faint unresolved
-      // higher-order disk image rather than another broad decorative halo.
       float hairline=1.-smoothstep(aa*.55,aa*2.2+.0028,critical);
       float shoulder=1.-smoothstep(aa*1.2+.003,aa*5.5+.018,critical);
       float ring=max(hairline*.82,shoulder*.22);
@@ -349,9 +328,6 @@
       float shift1=diskColorShift;
       if(o0>0.)light+=plasma(u0,o0,height,orbitalPhase,shift0);
       if(o1>0.)light+=plasma(u1,o1,height,orbitalPhase,shift1);
-
-      // A low-energy sheath gives the optically thick surface a soft edge
-      // without changing the solved geodesic silhouette.
       float halo0=v0?pulse(UO*.965,(EH/RI)*1.015,u0,max(w0,.006)):0.;
       float halo1=v1?pulse(UO*.965,(EH/RI)*1.015,u1,max(w1,.006)):0.;
       float rim0=v0?rimMask(u0,orbitalPhase):0.;
@@ -394,9 +370,6 @@
       return spaceColor(d,1.);
     }
     vec3 raytracedSpace(vec3 local){
-      // This is the numerical light-path integration from the reference
-      // renderer, expressed in the same Schwarzschild units as the lookup
-      // geometry. There is no screen-space lens mask or circular blend.
       const float HORIZON=EH;
       vec3 pos=radial*(EH/max(observerU,1e-6));
       float frequencyShift=1.;
@@ -424,7 +397,6 @@
         dir=normalize(dir+accel*ds);
         pos+=dir*ds;
       }
-      // Rays still orbiting after the full budget belong to the shadow.
       return vec3(0);
     }
     vec3 interiorOutsideRay(vec3 observed){
@@ -438,10 +410,6 @@
         vec3 helper=abs(radial.y)<.95?vec3(0,1,0):vec3(1,0,0);
         tangent=normalize(cross(cross(radial,helper),radial));
       }else tangent/=tl;
-
-      // After the horizon handoff, outside light is still sampled from the
-      // exterior Schwarzschild solution, but the visible sky is angularly
-      // squeezed toward the outward light cone instead of simply fading out.
       float folded=angle*cone/PI;
       vec3 foldedRay=normalize(cos(folded)*radial+sin(folded)*tangent);
       vec3 axisRay=mu>=0.?radial:-radial;
@@ -452,8 +420,6 @@
       vec2 center=resolution*.5+pan*resolution.y*.5;
       float orbitalPhase=atan(gl_FragCoord.y-center.y,
                               gl_FragCoord.x-center.x);
-      // A smooth Gaussian density profile sampled through the disk atmosphere.
-      // Every layer uses the original geodesic solver; only optical depth varies.
       vec3 exteriorRay=observed;
       float interiorClosure=0.;
       float exteriorAttenuation=1.;
@@ -470,9 +436,6 @@
       }
       vec3 sky=raytracedSpace(exteriorRay);
       if(interior>0.){
-        // Once inside, a shrinking outside light cone should dim continuously.
-        // Blend away from the exterior escape/capture test so rays do not
-        // all snap black when the compressed cone crosses the photon shadow.
         float centerPointStarFade=smoothstep(.04,.18,
                                              length(observed+radial));
         vec3 coneSky=shiftedSpectrum(spaceColor(exteriorRay,
@@ -481,13 +444,8 @@
         sky=mix(sky,coneSky,smoothstep(.06,.75,interior));
       }
       sky*=exteriorAttenuation;
-      // Keep the accretion disk on its solved geodesics. A single luminous
-      // stream avoids the stacked line artifacts that appear when lensed height
-      // slices separate near the photon ring.
       vec3 disk=(trace(exteriorRay,0.,orbitalPhase)
                 +higherOrderRing(exteriorRay,orbitalPhase))*1.05;
-      // The disk stays outside and behind the infaller. Its geodesic images
-      // leave view only when their shared outward causal window closes.
       disk*=exteriorAttenuation;
       vec3 hdr=sky+disk;
       hdr+=vec3(1.,.34,.07)*interiorCaustic*.08*exteriorAttenuation;
@@ -521,16 +479,12 @@
                 texture(scene,at-vec2(1,0)*px).r),
             texture(scene,at+vec2(0,1)*px).r),
         texture(scene,at-vec2(0,1)*px).r);
-      // Extended plasma blooms. Isolated point stars retain compact halos
-      // instead of exposing the sparse bloom kernel as a cross.
       float bloomSupport=smoothstep(.018,.11,nearby);
       return max(c-vec3(.055),0.)*bloomSupport;
     }
     void main(){
       vec2 px=1./resolution;
       vec3 base=texture(scene,uv).rgb;
-      // Optical scattering inside the hot gas removes sub-pixel geometric
-      // separations while leaving the original lensing solution underneath.
       vec3 meld=base*.28;
       meld+=(texture(scene,uv+vec2( 2.,0.)*px).rgb
             +texture(scene,uv+vec2(-2.,0.)*px).rgb
@@ -653,10 +607,6 @@
     };
     const view = { ...defaults },
       pointers = new Map();
-
-    // A procedural, continuously evolving roar avoids the obvious repetition of
-    // a short audio loop. It begins after the first user gesture, as required by
-    // browser autoplay policies.
     let audio,
       fallMode = false,
       fallRadius = defaults.distance,
@@ -721,8 +671,6 @@
         oscillator.connect(gain).connect(drone);
         oscillator.start();
       });
-
-      // Integrated random samples create a heavy, non-hissy turbulent bed.
       const noiseBuffer = context.createBuffer(
         1,
         context.sampleRate * 4,
@@ -742,8 +690,6 @@
       noiseSplit.connect(turbulence);
       noiseSplit.connect(shear);
       noise.start();
-
-      // Slow irregular "pressure" oscillation keeps the roar alive.
       const pressure = context.createOscillator();
       const pressureDepth = context.createGain();
       pressure.type = "sine";
@@ -786,8 +732,6 @@
           (view.distance - MIN_DISTANCE) / (DISK_INNER_EDGE - MIN_DISTANCE),
         ),
       );
-      // The inner disk is the acoustic peak. Inside it, a smooth turning point
-      // rolls the roar down to a muffled residual hum at the horizon.
       const horizonFade =
         horizonDistance * horizonDistance * (3 - 2 * horizonDistance);
       const intensity = rise * horizonFade;
@@ -890,10 +834,6 @@
       if (fallMode) {
         const properStep = dt * FALL_PROPER_TIME_RATE;
         if (fallRadius > 0) {
-          // Radial geodesic for an observer dropped from rest at infinity:
-          // dr/dtau = -sqrt(r_s / r). The displayed Schwarzschild coordinate
-          // is clamped just outside r_s because the exterior chart is singular
-          // at the horizon, but the simulated worldline keeps crossing.
           const safeRadius = Math.max(fallRadius, EVENT_HORIZON);
           fallRadius = Math.max(
             0,
@@ -903,9 +843,6 @@
         }
         if (fallRadius <= EVENT_HORIZON) {
           insideProperTime += properStep;
-          // Scale-free black-hole units can make horizon-to-singularity time
-          // visually tiny. Stretch only the display clock so crossing the
-          // horizon remains locally uneventful.
           interiorDepth =
             (insideProperTime /
               (HORIZON_TO_SINGULARITY * INTERIOR_TIME_STRETCH)) *
@@ -963,8 +900,6 @@
       };
     };
     const zoomBy = (factor) => {
-      // Scale altitude above the horizon rather than the absolute radius. This
-      // gives the final approach enough precision while never crossing r = 0.5.
       const altitude = (view.distance - EVENT_HORIZON) * factor;
       view.distance =
         EVENT_HORIZON +
