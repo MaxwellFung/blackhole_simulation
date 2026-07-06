@@ -168,7 +168,8 @@
                  mix(mix(hash31(i+vec3(0,0,1)),hash31(i+vec3(1,0,1)),f.x),
                      mix(hash31(i+vec3(0,1,1)),hash31(i+vec3(1,1,1)),f.x),f.y),f.z);
     }
-    vec3 plasma(float u,float opacity,float height,float orbitalPhase){
+    vec3 shiftedSpectrum(vec3 color,float shift);
+    vec3 plasma(float u,float opacity,float height,float orbitalPhase,float shift){
       float r=EH/max(u,1e-5);
       float q=clamp((r-RI)/(RO-RI),0.,1.);
       vec2 stir=vec2(cos(time*.43),sin(time*.31));
@@ -208,17 +209,17 @@
       density*=mix(.62,1.42,churn);
       density*=exp(-height*height*2.2);
       density*=mix(1.,.28,outerFade)*intermittent*wispiness*rim;
-      float heat=pow(1.-q,.42);
+      float diskProfile=max(0.,pow(RI/max(r,RI),3.)*(1.-sqrt(RI/max(r,RI))));
+      float heat=mix(pow(1.-q,.42),pow(clamp(diskProfile*55.,0.,1.),.25),.65);
       float hot=pow(heat,2.2)*mix(.52,1.48,fine)*mix(.8,1.25,knots);
-      vec3 copper=vec3(1.0,.19,.025);
-      vec3 amber=vec3(1.0,.54,.16);
-      vec3 white=vec3(1.0,.93,.72);
+      vec3 copper=vec3(1.0,.16,.025);
+      vec3 amber=vec3(1.0,.48,.13);
+      vec3 white=vec3(1.0,.88,.62);
       vec3 tint=mix(copper,amber,smoothstep(0.,.78,heat));
       tint=mix(tint,white,smoothstep(.48,1.08,hot));
       tint=mix(tint,vec3(.78,.36,.13),outerTint*.62);
-      float beaming=.78+.32*sin(orbitalPhase+1.1);
       float gasGlow=mix(1.15+5.8*hot,.26+1.36*hot,outerFade);
-      return tint*opacity*density*gasGlow*beaming;
+      return shiftedSpectrum(tint,shift)*opacity*density*gasGlow;
     }
     vec3 fallRay(vec3 local,out float frequencyShift){
       // Exact local aberration for a radial geodesic dropped from rest at
@@ -262,6 +263,21 @@
       // I_nu/nu^3 is invariant along a vacuum null geodesic.
       return color*clamp(g*g*g,.015,12.);
     }
+    float diskShift(){
+      float observerLapse=max(lapse,.18);
+      // A screen-continuous approximation to Schwarzschild circular-orbit
+      // Doppler beaming. Keeping it independent of the lensed branch removes
+      // nonphysical brightness seams between primary and secondary images.
+      float beta=.44;
+      float gamma=1./sqrt(max(1.-beta*beta,1e-4));
+      float inclination=sqrt(max(1.-radial.y*radial.y,0.));
+      vec2 center=resolution*.5+pan*resolution.y*.5;
+      float screenX=clamp((gl_FragCoord.x-center.x)/(resolution.y*.48),-1.,1.);
+      float approach=-screenX*inclination;
+      float gravitational=.82/observerLapse;
+      float doppler=1./(gamma*max(1.-beta*approach,.35));
+      return clamp(gravitational*doppler,.68,1.42);
+    }
     vec3 trace(vec3 local,float height,float orbitalPhase){
       float lr=dot(local,radial);
       float shift=1.;
@@ -298,8 +314,11 @@
       if(observerU<UO&&e<GUARD)return vec3(0);
 
       vec3 light=vec3(0);
-      if(o0>0.)light+=plasma(u0,o0,height,orbitalPhase);
-      if(o1>0.)light+=plasma(u1,o1,height,orbitalPhase);
+      float diskColorShift=diskShift();
+      float shift0=diskColorShift;
+      float shift1=diskColorShift;
+      if(o0>0.)light+=plasma(u0,o0,height,orbitalPhase,shift0);
+      if(o1>0.)light+=plasma(u1,o1,height,orbitalPhase,shift1);
 
       // A low-energy sheath gives the optically thick surface a soft edge
       // without changing the solved geodesic silhouette.
