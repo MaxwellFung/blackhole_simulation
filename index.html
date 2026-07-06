@@ -217,6 +217,31 @@
         font-size: 11px;
         line-height: 1.45;
       }
+      .parameters {
+        display: grid;
+        gap: 7px;
+        margin: 0;
+      }
+      .parameters div {
+        display: grid;
+        grid-template-columns: minmax(150px, 0.42fr) 1fr;
+        gap: 12px;
+        border-left: 2px solid #333;
+        padding: 7px 10px;
+        background: #0d0d0d;
+      }
+      .parameters dt {
+        color: #fff;
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      .parameters dd {
+        margin: 0;
+        color: #c9c9c9;
+        font-size: 12px;
+        line-height: 1.45;
+      }
       .info-credit {
         border-top: 1px solid #333;
         margin-top: 18px;
@@ -291,6 +316,10 @@
           right: 18px;
           bottom: 18px;
           max-width: 220px;
+        }
+        .parameters div {
+          grid-template-columns: 1fr;
+          gap: 2px;
         }
       }
     </style>
@@ -490,6 +519,60 @@
           </dl>
         </section>
         <section class="info-section">
+          <h3>Simulation Parameters</h3>
+          <dl class="parameters">
+            <div>
+              <dt>Black hole type</dt>
+              <dd>Schwarzschild: non-spinning and uncharged.</dd>
+            </div>
+            <div>
+              <dt>Spin</dt>
+              <dd>Dimensionless spin a* = 0. Kerr frame dragging is not simulated.</dd>
+            </div>
+            <div>
+              <dt>Physical mass</dt>
+              <dd>
+                No mass is assigned. The scene is scale-free; choosing any mass
+                M sets r_s = 2GM/c² and scales every length with r_s.
+              </dd>
+            </div>
+            <div>
+              <dt>Horizon radius</dt>
+              <dd>r_s = 0.5 renderer units.</dd>
+            </div>
+            <div>
+              <dt>Photon sphere</dt>
+              <dd>r_ph = 1.5 r_s = 0.75 renderer units.</dd>
+            </div>
+            <div>
+              <dt>Disk inner edge</dt>
+              <dd>3 r_s = 1.5 renderer units, matching the Schwarzschild ISCO.</dd>
+            </div>
+            <div>
+              <dt>Bright disk edge</dt>
+              <dd>5.6 r_s = 2.8 renderer units.</dd>
+            </div>
+            <div>
+              <dt>Default observer</dt>
+              <dd>14.4 r_s = 7.2 renderer units from the black hole.</dd>
+            </div>
+            <div>
+              <dt>Fall endpoint</dt>
+              <dd>
+                The camera approaches just outside the horizon at about 1.0015 r_s
+                before the interior visual handoff.
+              </dd>
+            </div>
+            <div>
+              <dt>Disk Doppler speed</dt>
+              <dd>
+                Approximate visual orbital speed β ≈ 0.44, used for the
+                screen-continuous Doppler color and brightness shift.
+              </dd>
+            </div>
+          </dl>
+        </section>
+        <section class="info-section">
           <h3>Modeled For The Visual</h3>
           <ul>
             <li>
@@ -517,6 +600,10 @@
             <li>
               No Kerr spin, frame dragging, tilted disk, or asymmetric Kerr
               shadow.
+            </li>
+            <li>
+              No physical mass, accretion rate, temperature, or telescope
+              distance is assigned.
             </li>
             <li>
               The disk Doppler field is screen-continuous, not a full per-ray
