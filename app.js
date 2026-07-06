@@ -237,6 +237,19 @@
         stationary+radialPart*(lapse-1.)*radial
       );
     }
+    float fallCaptureMask(vec3 d){
+      if(falling<.5)return 0.;
+      d=normalize(d);
+      float inward=1.-smoothstep(-.025,.025,dot(d,radial));
+      float r=EH/max(observerU,1e-6);
+      float lapse2=max(1.-observerU,1e-5);
+      float sin2=max(1.-pow(dot(d,radial),2.),0.);
+      float b2=r*r*sin2/lapse2;
+      float critical2=6.75*EH*EH;
+      float q=b2/critical2;
+      float edge=max(fwidth(q)*1.5,.018);
+      return inward*(1.-smoothstep(1.-edge,1.+edge,q));
+    }
     vec3 shiftedSpectrum(vec3 color,float shift){
       float g=clamp(shift,.12,3.);
       if(g<1.){
@@ -279,13 +292,15 @@
       float hairline=1.-smoothstep(aa*.55,aa*2.2+.0028,critical);
       float shoulder=1.-smoothstep(aa*1.2+.003,aa*5.5+.018,critical);
       float ring=max(hairline*.82,shoulder*.22);
+      float axisFade=falling>.5?
+        smoothstep(.012,.045,length(cross(radial,d))):1.;
 
       float az=orbitalPhase-time*.34;
       float sourceArc=.50+.50*smoothstep(.05,.82,abs(sin(az)));
       float fine=.86+.14*sin(az*18.+time*.7);
       vec3 tint=shiftedSpectrum(vec3(1.,.46,.14),diskShift());
       if(falling>.5)tint=shiftedSpectrum(tint,clamp(infallShift,.35,1.8));
-      return tint*ring*sourceArc*fine*.045;
+      return tint*ring*sourceArc*fine*.045*axisFade;
     }
     vec3 trace(vec3 local,float height,float orbitalPhase){
       float lr=dot(local,radial);
@@ -299,6 +314,7 @@
 
       vec3 n=cross(radial,d);
       float nl=length(n);if(nl<1e-6)return vec3(0);n/=nl;
+      float axisFade=falling>.5?smoothstep(.012,.045,nl):1.;
       vec3 tangent=cross(n,radial),axis=cross(vec3(0,1,0),n);
       float al=length(axis);if(al<1e-6)return vec3(0);axis/=al;
       if(dot(axis,tangent)<0.)axis=-axis;
@@ -335,7 +351,7 @@
       light+=vec3(1.,.25,.045)*.11*(halo0*rim0+halo1*rim1);
       if(falling>.5)
         light=shiftedSpectrum(light,clamp(shift,.35,1.8));
-      return light;
+      return light*axisFade;
     }
     vec3 spaceColor(vec3 d,float starVisibility){
       d=normalize(d);
@@ -378,11 +394,13 @@
       vec3 dir;
       if(falling>.5)dir=fallRay(local,frequencyShift);
       else dir=normalize(local);
+      float launchCapture=fallCaptureMask(dir);
       for(int i=0;i<176;i++){
         float r=length(pos);
         if(r<HORIZON*1.001)return vec3(0);
         if(r>46.&&dot(pos,dir)>0.){
           vec3 sky=spaceColor(dir,centerPointStarFade);
+          sky*=1.-launchCapture;
           return falling>.5?shiftedSpectrum(sky,frequencyShift):sky;
         }
 
@@ -451,8 +469,14 @@
       hdr+=vec3(1.,.34,.07)*interiorCaustic*.08*exteriorAttenuation;
       vec3 mapped=1.-exp(-hdr*.72);
       mapped=pow(mapped,vec3(.82));
+      float shadowGrainMask=1.;
+      if(falling>.5&&interior<=0.){
+        float maskShift=1.;
+        shadowGrainMask=1.-fallCaptureMask(fallRay(exteriorRay,maskShift));
+      }
       float grain=hash21(gl_FragCoord.xy)-.5;
-      mapped+=grain*(1.-smoothstep(.05,.8,max(mapped.r,max(mapped.g,mapped.b))))*.012;
+      mapped+=grain*shadowGrainMask*
+              (1.-smoothstep(.05,.8,max(mapped.r,max(mapped.g,mapped.b))))*.012;
       color=vec4(max(mapped,0.),1);
     }
   `;
