@@ -5,6 +5,9 @@
   const reset = document.querySelector("#reset");
   const sound = document.querySelector("#sound");
   const fall = document.querySelector("#fall");
+  const infoToggle = document.querySelector("#info-toggle");
+  const info = document.querySelector("#info");
+  const infoClose = document.querySelector("#info-close");
   const help = document.querySelector(".help");
   const gl = canvas.getContext("webgl2", {
     alpha: false,
@@ -278,6 +281,31 @@
       float doppler=1./(gamma*max(1.-beta*approach,.35));
       return clamp(gravitational*doppler,.68,1.42);
     }
+    vec3 higherOrderRing(vec3 local,float orbitalPhase){
+      float infallShift=1.;
+      vec3 d;
+      if(falling>.5)d=fallRay(local,infallShift);
+      else d=local+dot(local,radial)*(lapse-1.)*radial;
+
+      float delta=acos(clamp(dot(radial,normalize(d)),-1.,1.));
+      float ud=-observerU/tan(delta);
+      float e=ud*ud+observerU*observerU*(1.-observerU);
+      float critical=abs(e/MU-1.);
+      float aa=max(fwidth(e/MU),1e-5);
+
+      // Near e = MU, rays skim the photon sphere. This adds a faint unresolved
+      // higher-order disk image rather than another broad decorative halo.
+      float hairline=1.-smoothstep(aa*.55,aa*2.2+.0028,critical);
+      float shoulder=1.-smoothstep(aa*1.2+.003,aa*5.5+.018,critical);
+      float ring=max(hairline*.82,shoulder*.22);
+
+      float az=orbitalPhase-time*.34;
+      float sourceArc=.50+.50*smoothstep(.05,.82,abs(sin(az)));
+      float fine=.86+.14*sin(az*18.+time*.7);
+      vec3 tint=shiftedSpectrum(vec3(1.,.46,.14),diskShift());
+      if(falling>.5)tint=shiftedSpectrum(tint,clamp(infallShift,.35,1.8));
+      return tint*ring*sourceArc*fine*.045;
+    }
     vec3 trace(vec3 local,float height,float orbitalPhase){
       float lr=dot(local,radial);
       float shift=1.;
@@ -399,7 +427,8 @@
       // Keep the accretion disk on its solved geodesics. A single luminous
       // stream avoids the stacked line artifacts that appear when lensed height
       // slices separate near the photon ring.
-      vec3 disk=trace(observed,0.,orbitalPhase)*1.05;
+      vec3 disk=(trace(observed,0.,orbitalPhase)
+                +higherOrderRing(observed,orbitalPhase))*1.05;
       // The disk stays outside and behind the infaller. Its geodesic images
       // leave view only when their shared outward causal window closes.
       disk*=exteriorWindow*exteriorAttenuation;
@@ -1009,6 +1038,18 @@
       updateChrome();
       quality(true);
     });
+    infoToggle.addEventListener("click", () => {
+      if (info.open) return;
+      info.showModal();
+      infoToggle.setAttribute("aria-expanded", "true");
+    });
+    infoClose.addEventListener("click", () => info.close());
+    info.addEventListener("click", (e) => {
+      if (e.target === info) info.close();
+    });
+    info.addEventListener("close", () => {
+      infoToggle.setAttribute("aria-expanded", "false");
+    });
     fall.addEventListener("click", () => setFallMode(!fallMode));
     sound.addEventListener("click", () => {
       soundEnabled = !soundEnabled;
@@ -1019,6 +1060,7 @@
     });
     addEventListener("keydown", (e) => {
       if (e.repeat) return;
+      if (info.open) return;
       if (e.key === "Escape" && fallMode) setFallMode(false);
     });
     addEventListener("resize", () => quality(true), { passive: true });

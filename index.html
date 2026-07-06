@@ -113,6 +113,129 @@
       body.ui-hidden .controls {
         pointer-events: none;
       }
+      dialog {
+        position: fixed;
+        z-index: 4;
+        top: 50%;
+        left: 50%;
+        width: min(760px, calc(100vw - 32px));
+        max-height: min(760px, calc(100vh - 32px));
+        margin: 0;
+        border: 1px solid #555;
+        padding: 0;
+        background: #050505;
+        color: #fff;
+        transform: translate(-50%, -50%);
+        box-shadow: 0 24px 80px #000;
+      }
+      dialog::backdrop {
+        background: rgb(0 0 0 / 0.72);
+      }
+      .info-sheet {
+        max-height: inherit;
+        overflow: auto;
+        padding: 22px 24px 24px;
+        text-transform: none;
+      }
+      .info-title {
+        display: flex;
+        align-items: start;
+        justify-content: space-between;
+        gap: 16px;
+        margin-bottom: 18px;
+        text-transform: uppercase;
+      }
+      .info-title h2 {
+        margin: 0;
+        font-size: 14px;
+        letter-spacing: 0.14em;
+      }
+      .info-title p {
+        margin: 5px 0 0;
+        color: #aaa;
+        letter-spacing: 0.06em;
+      }
+      .info-close {
+        flex: 0 0 auto;
+      }
+      .info-section {
+        border-top: 1px solid #333;
+        padding-top: 15px;
+        margin-top: 15px;
+      }
+      .info-section h3 {
+        margin: 0 0 9px;
+        font-size: 11px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+      .info-section p,
+      .info-section li {
+        color: #c9c9c9;
+        font-size: 12px;
+        line-height: 1.55;
+      }
+      .info-section p {
+        margin: 0 0 9px;
+      }
+      .info-section ul {
+        margin: 0;
+        padding-left: 18px;
+      }
+      .equations {
+        display: grid;
+        gap: 8px;
+        margin: 0;
+      }
+      .equations div {
+        border-left: 2px solid #8a5128;
+        padding: 8px 10px;
+        background: #111;
+      }
+      .equations dt {
+        margin-bottom: 2px;
+        color: #fff;
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      .equations dd {
+        margin: 0;
+        color: #d7c7b8;
+      }
+      .equations math {
+        display: block;
+        overflow-x: auto;
+        overflow-y: hidden;
+        color: #f0d8bd;
+        font-size: 15px;
+      }
+      .equation-note {
+        display: block;
+        margin-top: 5px;
+        color: #aaa;
+        font-size: 11px;
+        line-height: 1.45;
+      }
+      .info-credit {
+        border-top: 1px solid #333;
+        margin-top: 18px;
+        padding-top: 14px;
+        color: #888;
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      .info-credit a {
+        color: #d7c7b8;
+        text-decoration: none;
+      }
+      .info-credit a:hover,
+      .info-credit a:focus-visible {
+        color: #fff;
+        text-decoration: underline;
+        outline: 0;
+      }
       #suit {
         position: fixed;
         z-index: 1;
@@ -159,6 +282,9 @@
           top: 18px;
           right: auto;
           left: 50%;
+          width: calc(100% - 28px);
+          justify-content: center;
+          flex-wrap: wrap;
           transform: translateX(-50%);
         }
         .help {
@@ -182,10 +308,250 @@
       <button id="fall" type="button" aria-pressed="false">Fall mode</button>
       <button id="sound" type="button" aria-pressed="false">Sound: off</button>
       <button id="reset" type="button">Reset view</button>
+      <button
+        id="info-toggle"
+        type="button"
+        aria-haspopup="dialog"
+        aria-controls="info"
+        aria-expanded="false"
+      >
+        Info
+      </button>
     </div>
     <div class="help">
       Drag: orbit · Shift drag: move<br />Wheel or pinch: zoom
     </div>
+    <dialog id="info" aria-labelledby="info-heading">
+      <div class="info-sheet">
+        <div class="info-title">
+          <div>
+            <h2 id="info-heading">Physics model</h2>
+            <p>
+              What is simulated, what is visualized, and what is simplified.
+            </p>
+          </div>
+          <button id="info-close" class="info-close" type="button">
+            Close
+          </button>
+        </div>
+        <section class="info-section">
+          <h3>Equations Used</h3>
+          <dl class="equations">
+            <div>
+              <dt>Schwarzschild spacetime</dt>
+              <dd>
+                <math display="block">
+                  <mrow>
+                    <mi>d</mi><msup><mi>s</mi><mn>2</mn></msup>
+                    <mo>=</mo>
+                    <mo>-</mo>
+                    <mrow>
+                      <mo>(</mo>
+                      <mn>1</mn><mo>-</mo>
+                      <mfrac
+                        ><msub><mi>r</mi><mi>s</mi></msub
+                        ><mi>r</mi></mfrac
+                      >
+                      <mo>)</mo>
+                    </mrow>
+                    <msup><mi>c</mi><mn>2</mn></msup>
+                    <mi>d</mi><msup><mi>t</mi><mn>2</mn></msup>
+                    <mo>+</mo>
+                    <msup>
+                      <mrow>
+                        <mo>(</mo>
+                        <mn>1</mn><mo>-</mo>
+                        <mfrac
+                          ><msub><mi>r</mi><mi>s</mi></msub
+                          ><mi>r</mi></mfrac
+                        >
+                        <mo>)</mo>
+                      </mrow>
+                      <mrow><mo>-</mo><mn>1</mn></mrow>
+                    </msup>
+                    <mi>d</mi><msup><mi>r</mi><mn>2</mn></msup>
+                    <mo>+</mo>
+                    <msup><mi>r</mi><mn>2</mn></msup>
+                    <mi>d</mi><msup><mi>Ω</mi><mn>2</mn></msup>
+                  </mrow>
+                </math>
+              </dd>
+            </div>
+            <div>
+              <dt>Null rays</dt>
+              <dd>
+                <math display="block">
+                  <mrow>
+                    <mi>d</mi><msup><mi>s</mi><mn>2</mn></msup>
+                    <mo>=</mo>
+                    <mn>0</mn>
+                  </mrow>
+                </math>
+                <span class="equation-note">
+                  Light follows null geodesics; disk intersections use a
+                  precomputed Schwarzschild bending table.
+                </span>
+              </dd>
+            </div>
+            <div>
+              <dt>Photon-sphere critical curve</dt>
+              <dd>
+                <math display="block">
+                  <mrow>
+                    <msub><mi>r</mi><mtext>ph</mtext></msub>
+                    <mo>=</mo>
+                    <mfrac><mn>3</mn><mn>2</mn></mfrac>
+                    <msub><mi>r</mi><mi>s</mi></msub>
+                    <mo>,</mo>
+                    <mspace width="0.75em"></mspace>
+                    <msub><mi>e</mi><mtext>crit</mtext></msub>
+                    <mo>=</mo>
+                    <mfrac><mn>4</mn><mn>27</mn></mfrac>
+                  </mrow>
+                </math>
+              </dd>
+            </div>
+            <div>
+              <dt>Doppler factor approximation</dt>
+              <dd>
+                <math display="block">
+                  <mrow>
+                    <mi>g</mi>
+                    <mo>≈</mo>
+                    <mfrac>
+                      <msub><mi>g</mi><mtext>grav</mtext></msub>
+                      <mrow>
+                        <mi>γ</mi>
+                        <mo>(</mo><mn>1</mn><mo>-</mo><mi>β</mi><mi>μ</mi
+                        ><mo>)</mo>
+                      </mrow>
+                    </mfrac>
+                    <mo>,</mo>
+                    <mspace width="0.75em"></mspace>
+                    <mi>γ</mi>
+                    <mo>=</mo>
+                    <mfrac>
+                      <mn>1</mn>
+                      <msqrt>
+                        <mrow
+                          ><mn>1</mn><mo>-</mo
+                          ><msup><mi>β</mi><mn>2</mn></msup></mrow
+                        >
+                      </msqrt>
+                    </mfrac>
+                  </mrow>
+                </math>
+              </dd>
+            </div>
+            <div>
+              <dt>Relativistic brightness</dt>
+              <dd>
+                <math display="block">
+                  <mrow>
+                    <msub>
+                      <mi>I</mi>
+                      <mrow><mi>ν</mi><mo>,</mo><mtext>obs</mtext></mrow>
+                    </msub>
+                    <mo>≈</mo>
+                    <msup><mi>g</mi><mn>3</mn></msup>
+                    <msub>
+                      <mi>I</mi>
+                      <mrow><mi>ν</mi><mo>,</mo><mtext>emit</mtext></mrow>
+                    </msub>
+                  </mrow>
+                </math>
+              </dd>
+            </div>
+            <div>
+              <dt>Free-fall observer mode</dt>
+              <dd>
+                <math display="block">
+                  <mrow>
+                    <msub><mi>β</mi><mtext>ff</mtext></msub>
+                    <mo>=</mo>
+                    <msqrt>
+                      <mfrac
+                        ><msub><mi>r</mi><mi>s</mi></msub
+                        ><mi>r</mi></mfrac
+                      >
+                    </msqrt>
+                    <mo>,</mo>
+                    <mspace width="0.75em"></mspace>
+                    <mi>μ</mi><mo>′</mo>
+                    <mo>=</mo>
+                    <mfrac>
+                      <mrow><mi>μ</mi><mo>+</mo><mi>β</mi></mrow>
+                      <mrow><mn>1</mn><mo>+</mo><mi>β</mi><mi>μ</mi></mrow>
+                    </mfrac>
+                  </mrow>
+                </math>
+              </dd>
+            </div>
+          </dl>
+        </section>
+        <section class="info-section">
+          <h3>Modeled For The Visual</h3>
+          <ul>
+            <li>
+              Non-spinning Schwarzschild black-hole lensing and shadow geometry.
+            </li>
+            <li>
+              Primary and secondary accretion-disk images from solved ray paths.
+            </li>
+            <li>
+              A faint critical-curve cue for unresolved higher-order disk
+              images.
+            </li>
+            <li>
+              Approximate gravitational redshift, Doppler color shift, and g³
+              beaming.
+            </li>
+            <li>
+              Free-fall view aberration as the camera approaches the horizon.
+            </li>
+          </ul>
+        </section>
+        <section class="info-section">
+          <h3>Simplified Or Not Included</h3>
+          <ul>
+            <li>
+              No Kerr spin, frame dragging, tilted disk, or asymmetric Kerr
+              shadow.
+            </li>
+            <li>
+              The disk Doppler field is screen-continuous, not a full per-ray
+              emitter four-velocity solve.
+            </li>
+            <li>
+              The higher-order photon ring is a faint critical-curve cue, not a
+              full sum of all orbiting images.
+            </li>
+            <li>
+              No radiative transfer, absorption, polarization, magnetic fields,
+              or plasma simulation.
+            </li>
+            <li>
+              The accretion disk texture, glow, and turbulence are procedural
+              visual materials.
+            </li>
+            <li>
+              Camera exposure, bloom, and tone mapping are artistic display
+              choices.
+            </li>
+          </ul>
+        </section>
+        <footer class="info-credit">
+          Made by Maxwell Fung · Physics + Data Science @ UC Berkeley ·
+          <a
+            href="https://github.com/MaxwellFung/blackhole_simulation"
+            target="_blank"
+            rel="noreferrer"
+          >
+            GitHub
+          </a>
+        </footer>
+      </div>
+    </dialog>
     <svg
       id="suit"
       viewBox="0 0 1000 1000"
